@@ -2,9 +2,12 @@ local Constants = require("src.constants")
 local Chunk = require("src.world.chunk")
 local Coord = require("src.world.coordinate")
 local Pipeline = require("src.gen.pipeline")
+local ChunkStore = require("src.persistence.chunk_store")
 
 local floor = math.floor
 local sqrt = math.sqrt
+local max = math.max
+local min = math.min
 
 local ChunkManager = {}
 ChunkManager.__index = ChunkManager
@@ -13,15 +16,23 @@ function ChunkManager.new(worldSeed)
     local self = setmetatable({
         chunks = {},
         loadQueue = {},
+        loadQueueHead = 1,
         worldSeed = worldSeed or Constants.DEFAULT_SEED,
         frameCount = 0,
         loadRadius = Constants.LOAD_RADIUS,
         cacheRadius = Constants.CACHE_RADIUS,
         maxCached = Constants.MAX_CACHED,
         genBudgetMs = Constants.GEN_BUDGET_MS,
+        cacheStaleFrames = Constants.CACHE_STALE_FRAMES or 1800,
+        cacheHardEvictMargin = Constants.CACHE_HARD_EVICT_MARGIN or 6,
+        cacheMaxForcedEvictPerFrame = Constants.CACHE_MAX_FORCED_EVICT_PER_FRAME or 8,
         loadedCount = 0,
         lastCamCx = nil,
         lastCamCy = nil,
+        chunkStore = ChunkStore.new(worldSeed or Constants.DEFAULT_SEED),
+        generatedThisFrame = 0,
+        evictedThisFrame = 0,
+        queueSizeThisFrame = 0,
     }, ChunkManager)
     return self
 end
@@ -45,6 +56,9 @@ function ChunkManager:getOrCreateChunk(cx, cy)
     local chunk = self.chunks[key]
     if not chunk then
         chunk = Chunk.new(cx, cy)
+        if self.chunkStore then
+            self.chunkStore:loadChunk(cx, cy, chunk)
+        end
         self.chunks[key] = chunk
         self.loadedCount = self.loadedCount + 1
     end
@@ -54,7 +68,11 @@ end
 
 function ChunkManager:removeChunk(cx, cy)
     local key = chunkKey(cx, cy)
-    if self.chunks[key] then
+    local chunk = self.chunks[key]
+    if chunk then
+        if self.chunkStore and chunk.generated then
+            self.chunkStore:saveChunk(chunk)
+        end
         self.chunks[key] = nil
         self.loadedCount = self.loadedCount - 1
     end
@@ -77,6 +95,8 @@ end
 
 function ChunkManager:update(camWx, camWy, dt)
     self.frameCount = self.frameCount + 1
+    self.generatedThisFrame = 0
+    self.evictedThisFrame = 0
 
     local camCx = floor(camWx / Constants.CHUNK_W)
     local camCy = floor(camWy / Constants.CHUNK_H)
@@ -93,10 +113,15 @@ function ChunkManager:update(camWx, camWy, dt)
 
     -- Evict distant chunks
     self:evictChunks(camCx, camCy)
+    self.queueSizeThisFrame = #self.loadQueue - self.loadQueueHead + 1
+    if self.queueSizeThisFrame < 0 then
+        self.queueSizeThisFrame = 0
+    end
 end
 
 function ChunkManager:rebuildLoadQueue(camCx, camCy)
     self.loadQueue = {}
+    self.loadQueueHead = 1
     local r = self.loadRadius
 
     -- Spiral outward from camera for prioritized loading
@@ -121,13 +146,13 @@ function ChunkManager:rebuildLoadQueue(camCx, camCy)
 end
 
 function ChunkManager:processQueue()
-    if #self.loadQueue == 0 then return end
+    if self.loadQueueHead > #self.loadQueue then return end
 
     local startTime = love.timer.getTime()
     local budget = self.genBudgetMs
 
-    while #self.loadQueue > 0 do
-        local entry = self.loadQueue[1]
+    while self.loadQueueHead <= #self.loadQueue do
+        local entry = self.loadQueue[self.loadQueueHead]
         local chunk = self:getOrCreateChunk(entry.cx, entry.cy)
 
         if not chunk.generated then
@@ -136,52 +161,95 @@ function ChunkManager:processQueue()
 
             local completed = Pipeline.generate(chunk, self.worldSeed, remainingBudget)
             if completed then
-                table.remove(self.loadQueue, 1)
+                if self.chunkStore then
+                    self.chunkStore:saveChunk(chunk)
+                end
+                self.generatedThisFrame = self.generatedThisFrame + 1
+                self.loadQueueHead = self.loadQueueHead + 1
             else
                 break  -- budget exhausted mid-stage
             end
         else
-            table.remove(self.loadQueue, 1)
+            self.loadQueueHead = self.loadQueueHead + 1
         end
 
         local elapsed = (love.timer.getTime() - startTime) * 1000
         if elapsed >= budget then break end
     end
+
+    if self.loadQueueHead > #self.loadQueue then
+        self.loadQueue = {}
+        self.loadQueueHead = 1
+    elseif self.loadQueueHead > 64 and self.loadQueueHead > (#self.loadQueue * 0.5) then
+        local compacted = {}
+        for i = self.loadQueueHead, #self.loadQueue do
+            compacted[#compacted + 1] = self.loadQueue[i]
+        end
+        self.loadQueue = compacted
+        self.loadQueueHead = 1
+    end
 end
 
 function ChunkManager:evictChunks(camCx, camCy)
-    local r = self.cacheRadius
-    local staleThreshold = self.frameCount - 300
+    local softR = self.cacheRadius
+    local hardR = softR + self.cacheHardEvictMargin
+    local softRSq = softR * softR
+    local hardRSq = hardR * hardR
+    local staleThreshold = self.frameCount - self.cacheStaleFrames
 
-    local toEvict = {}
+    local forcedEvict = {}
+    local optionalEvict = {}
     for key, chunk in pairs(self.chunks) do
         local dx = chunk.cx - camCx
         local dy = chunk.cy - camCy
-        local dist = sqrt(dx * dx + dy * dy)
-        if dist > r and chunk.lastAccess < staleThreshold then
-            toEvict[#toEvict + 1] = { key = key, dist = dist }
+        local distSq = dx * dx + dy * dy
+        if chunk.lastAccess < staleThreshold then
+            if distSq > hardRSq then
+                forcedEvict[#forcedEvict + 1] = { key = key, distSq = distSq }
+            elseif distSq > softRSq then
+                optionalEvict[#optionalEvict + 1] = { key = key, distSq = distSq }
+            end
         end
     end
 
-    -- Evict farthest first
-    if #toEvict > 0 then
-        table.sort(toEvict, function(a, b) return a.dist > b.dist end)
-        local maxEvict = self.loadedCount - self.maxCached
-        if maxEvict < 0 then maxEvict = 0 end
-        -- Always evict those beyond cache radius, up to reasonable limit
-        local count = math.min(#toEvict, math.max(maxEvict, 4))
-        for i = 1, count do
-            local key = toEvict[i].key
+    if #forcedEvict > 0 or #optionalEvict > 0 then
+        table.sort(forcedEvict, function(a, b) return a.distSq > b.distSq end)
+        table.sort(optionalEvict, function(a, b) return a.distSq > b.distSq end)
+
+        local forcedCount = min(#forcedEvict, self.cacheMaxForcedEvictPerFrame)
+        local needForCap = max(0, self.loadedCount - self.maxCached)
+        local optionalCount = min(#optionalEvict, max(0, needForCap - forcedCount))
+
+        local function evictByKey(key)
             -- Release GPU mesh before evicting to prevent memory leak
             local chunk = self.chunks[key]
+            if chunk and self.chunkStore and chunk.generated then
+                self.chunkStore:saveChunk(chunk)
+            end
             if chunk and chunk._mesh3d then
                 chunk._mesh3d:release()
                 chunk._mesh3d = nil
             end
             self.chunks[key] = nil
             self.loadedCount = self.loadedCount - 1
+            self.evictedThisFrame = self.evictedThisFrame + 1
+        end
+
+        for i = 1, forcedCount do
+            evictByKey(forcedEvict[i].key)
+        end
+        for i = 1, optionalCount do
+            evictByKey(optionalEvict[i].key)
         end
     end
+end
+
+function ChunkManager:getPerfStats()
+    return {
+        queue = self.queueSizeThisFrame or 0,
+        generated = self.generatedThisFrame or 0,
+        evicted = self.evictedThisFrame or 0,
+    }
 end
 
 return ChunkManager

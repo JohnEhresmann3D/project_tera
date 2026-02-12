@@ -3,22 +3,22 @@
 ## Phase 1: Start Menu & Game State Machine
 
 ### Game State System
-- [ ] Create `src/state/game_state.lua` — state enum (MENU, PLAYING, PAUSED) with enter/exit hooks
-- [ ] Create `src/state/state_manager.lua` — manages transitions, routes love callbacks per state
-- [ ] Refactor `main.lua` to delegate update/draw/keypressed to current state handler
-- [ ] Add pause menu (Escape toggles pause, shows resume/quit/settings)
+- [x] Create `src/state/game_state.lua` — state enum (MENU, PLAYING, PAUSED) with enter/exit hooks
+- [x] Create `src/state/state_manager.lua` — manages transitions, routes love callbacks per state
+- [x] Refactor `main.lua` to delegate update/draw/keypressed to current state handler
+- [x] Add pause menu (Escape toggles pause, shows resume/quit/settings)
 
 ### Start Menu
-- [ ] Create `src/ui/main_menu.lua` — title screen with options
-- [ ] Seed input field: type a number or string (hashed to numeric seed)
-- [ ] "Random Seed" button — generates a random seed and previews it
-- [ ] "Play" button — transitions to PLAYING state with chosen seed
-- [ ] Display seed on HUD during gameplay for sharing
-- [ ] Seed history: show last 5 seeds used (persist to file)
+- [x] Create `src/ui/main_menu.lua` — title screen with options
+- [x] Seed input field: type a number or string (hashed to numeric seed)
+- [x] "Random Seed" button - generates a random seed and previews it
+- [x] "Play" button - transitions to PLAYING state with chosen seed
+- [x] Display seed on HUD during gameplay for sharing
+- [x] Seed history: show last 5 seeds used (persist to file)
 
 ### UI Foundation
-- [ ] Create `src/ui/ui.lua` — basic UI framework (buttons, text input, panels)
-- [ ] Mouse cursor management: show cursor in menus, hide in gameplay
+- [x] Create `src/ui/ui.lua` — basic UI framework (buttons, text input, panels)
+- [x] Mouse cursor management: show cursor in menus, hide in gameplay
 - [ ] Screen resolution / fullscreen toggle in settings
 
 ---
@@ -26,7 +26,7 @@
 ## Phase 2: Modularity & Architecture Cleanup
 
 ### Decouple main.lua
-- [ ] Move love callback routing into state manager (love.update → stateManager:update)
+- [x] Move love callback routing into state manager (love.update -> stateManager:update)
 - [ ] Extract keybind definitions into `src/config/keybinds.lua` (data-driven, not hardcoded if/elseif)
 - [ ] Move debug overlay toggle logic out of main.lua keypressed
 
@@ -173,3 +173,5 @@
 | **Gameplay Engineer** (`gameplay_engineer.md`) | Player controller, block interaction, inventory, crafting, entities |
 | **PCG World Engineer** (`pcgn_world_engineer.md`) | Chunk streaming, generation pipeline, new biome stages |
 | **Biome Designer** (`biom_designer.md`) | New biomes, feature placement, transitions, decoration |
+
+

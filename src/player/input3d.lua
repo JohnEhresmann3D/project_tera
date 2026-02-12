@@ -22,6 +22,11 @@ function Input3D.toggleCapture()
     love.mouse.setRelativeMode(captured)
 end
 
+function Input3D.setCapture(enabled)
+    captured = not not enabled
+    love.mouse.setRelativeMode(captured)
+end
+
 function Input3D.isCaptured()
     return captured
 end

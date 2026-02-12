@@ -2,11 +2,15 @@ local Constants = require("src.constants")
 local Coord = require("src.world.coordinate")
 local BiomeCatalog = require("src.biomes.catalog")
 local Profiler = require("src.debug.profiler")
+local TerrainFields = require("src.gen.terrain_fields")
 
 local CW = Constants.CHUNK_W
 local CH = Constants.CHUNK_H
 local TW = Constants.TILE_W
 local TH = Constants.TILE_H
+local floor = math.floor
+local abs = math.abs
+local max = math.max
 
 local DebugOverlay = {}
 DebugOverlay.modes = {
@@ -18,7 +22,8 @@ DebugOverlay.modes = {
     biomes = 5,
     caves = 6,
     perf = 7,
-    lighting = 8,
+    noise = 8,
+    lighting = 9,
 }
 
 DebugOverlay.activeMode = 0
@@ -47,13 +52,81 @@ end
 -- Set to true when using 3D renderer (disables iso-dependent overlays)
 DebugOverlay.mode3d = false
 
-function DebugOverlay.draw(camera, chunkManager)
+local noisePreview = {
+    image = nil,
+    centerX = 0,
+    centerY = 0,
+    seed = 0,
+    lastUpdate = 0,
+    landRatio = 0,
+    avgElevation = 0,
+    avgContinent = 0,
+    size = 160,
+    sampleStep = 2,
+}
+
+local function rebuildNoisePreview(centerX, centerY, seed)
+    local size = noisePreview.size
+    local half = floor(size * 0.5)
+    local step = noisePreview.sampleStep
+    local waterLevel = Constants.WATER_LEVEL_Z
+    local imageData = love.image.newImageData(size, size)
+
+    local landCount = 0
+    local total = 0
+    local sumElevation = 0
+    local sumContinent = 0
+
+    for py = 0, size - 1 do
+        for px = 0, size - 1 do
+            local wx = centerX + floor((px - half) * step)
+            local wy = centerY + floor((py - half) * step)
+            local e, _, _, continent = TerrainFields.sample(seed, wx, wy)
+            local surfaceZ = TerrainFields.surfaceZFromElevation(e)
+
+            local r, g, b
+            if surfaceZ <= waterLevel then
+                local depth = (waterLevel - surfaceZ) / max(1, waterLevel)
+                r = 0.04 + continent * 0.06
+                g = 0.20 - depth * 0.07
+                b = 0.55 + depth * 0.35
+            else
+                local h = (surfaceZ - waterLevel) / max(1, (Constants.Z_LEVELS - 1 - waterLevel))
+                r = 0.18 + h * 0.30
+                g = 0.30 + h * 0.45
+                b = 0.14 + (1 - h) * 0.12
+                landCount = landCount + 1
+            end
+
+            imageData:setPixel(px, py, r, g, b, 1)
+            sumElevation = sumElevation + e
+            sumContinent = sumContinent + continent
+            total = total + 1
+        end
+    end
+
+    local image = love.graphics.newImage(imageData)
+    image:setFilter("nearest", "nearest")
+
+    noisePreview.image = image
+    noisePreview.centerX = centerX
+    noisePreview.centerY = centerY
+    noisePreview.seed = seed
+    noisePreview.lastUpdate = love.timer.getTime()
+    noisePreview.landRatio = landCount / max(1, total)
+    noisePreview.avgElevation = sumElevation / max(1, total)
+    noisePreview.avgContinent = sumContinent / max(1, total)
+end
+
+function DebugOverlay.draw(camera, chunkManager, player)
     local mode = DebugOverlay.activeMode
 
     if mode == DebugOverlay.modes.chunks then
         if not DebugOverlay.mode3d then
             DebugOverlay.drawChunkGrid(camera, chunkManager)
         end
+    elseif mode == DebugOverlay.modes.noise then
+        DebugOverlay.drawNoisePreview(chunkManager, player)
     elseif mode == DebugOverlay.modes.biomes then
         DebugOverlay.drawBiomeOverlay(camera, chunkManager)
     elseif mode == DebugOverlay.modes.perf then
@@ -63,6 +136,53 @@ function DebugOverlay.draw(camera, chunkManager)
             DebugOverlay.drawLightingOverlay(camera, chunkManager)
         end
     end
+end
+
+function DebugOverlay.drawNoisePreview(chunkManager, player)
+    local px, py = 0, 0
+    if player and player.getTilePos then
+        px, py = player:getTilePos()
+    end
+
+    local seed = chunkManager and chunkManager.worldSeed or Constants.DEFAULT_SEED
+    local now = love.timer.getTime()
+    local movedFar = abs(px - noisePreview.centerX) > 6 or abs(py - noisePreview.centerY) > 6
+    local stale = (now - noisePreview.lastUpdate) > 0.25
+    local seedChanged = seed ~= noisePreview.seed
+    if not noisePreview.image or movedFar or stale or seedChanged then
+        rebuildNoisePreview(px, py, seed)
+    end
+
+    local x = 8
+    local y = 140
+    local pad = 8
+    local mapSize = noisePreview.size
+    local panelW = mapSize + pad * 2
+    local panelH = mapSize + 84
+
+    love.graphics.setColor(0, 0, 0, 0.7)
+    love.graphics.rectangle("fill", x, y, panelW, panelH, 4)
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.print("Noise Preview (around player)", x + pad, y + 6)
+
+    if noisePreview.image then
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(noisePreview.image, x + pad, y + 24)
+    end
+
+    love.graphics.setColor(1, 1, 1, 0.9)
+    love.graphics.print(string.format("Seed: %d  Step: %d", seed, noisePreview.sampleStep), x + pad, y + mapSize + 30)
+    love.graphics.print(string.format("Land: %.1f%%", noisePreview.landRatio * 100), x + pad, y + mapSize + 46)
+    love.graphics.print(string.format("Avg E: %.3f  Avg C: %.3f", noisePreview.avgElevation, noisePreview.avgContinent), x + pad, y + mapSize + 62)
+
+    love.graphics.setColor(0.07, 0.22, 0.78, 1)
+    love.graphics.rectangle("fill", x + panelW - 58, y + mapSize + 44, 10, 10)
+    love.graphics.setColor(1, 1, 1, 0.9)
+    love.graphics.print("water", x + panelW - 44, y + mapSize + 42)
+    love.graphics.setColor(0.30, 0.68, 0.22, 1)
+    love.graphics.rectangle("fill", x + panelW - 58, y + mapSize + 60, 10, 10)
+    love.graphics.setColor(1, 1, 1, 0.9)
+    love.graphics.print("land", x + panelW - 44, y + mapSize + 58)
 end
 
 function DebugOverlay.drawChunkGrid(camera, chunkManager)

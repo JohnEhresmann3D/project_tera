@@ -1,8 +1,33 @@
 local lnoise = love.math.noise
 local abs = math.abs
 local exp = math.exp
+local floor = math.floor
 
 local Noise = {}
+
+-- Keep seed-derived coordinate offsets in a numerically stable range.
+-- Very large raw seeds can cause precision loss in noise inputs and flatten variation.
+local function normalizeSeed(seed)
+    local s = tonumber(seed) or 0
+    s = floor(s)
+    if s < 0 then s = -s end
+    return s % 2147483647
+end
+
+local function seedOffsets2D(seed)
+    local s = normalizeSeed(seed)
+    local ox = ((s * 1103515245 + 12345) % 1000003) * 0.001
+    local oy = ((s * 69069 + 1) % 1000003) * 0.001
+    return ox, oy
+end
+
+local function seedOffsets3D(seed)
+    local s = normalizeSeed(seed)
+    local ox = ((s * 1103515245 + 12345) % 1000003) * 0.001
+    local oy = ((s * 69069 + 1) % 1000003) * 0.001
+    local oz = ((s * 214013 + 2531011) % 1000003) * 0.001
+    return ox, oy, oz
+end
 
 -- Remap love.math.noise from [0,1] to [-1,1]
 local function noise2D(x, y)
@@ -24,8 +49,7 @@ function Noise.fbm2D(x, y, seed, octaves, persistence, lacunarity)
     local frequency = 1.0
     local maxVal = 0
 
-    local ox = seed * 1.31
-    local oy = seed * 1.77
+    local ox, oy = seedOffsets2D(seed)
 
     for i = 1, octaves do
         total = total + noise2D(x * frequency + ox, y * frequency + oy) * amplitude
@@ -47,9 +71,7 @@ function Noise.fbm3D(x, y, z, seed, octaves, persistence, lacunarity)
     local frequency = 1.0
     local maxVal = 0
 
-    local ox = seed * 1.31
-    local oy = seed * 1.77
-    local oz = seed * 2.13
+    local ox, oy, oz = seedOffsets3D(seed)
 
     for i = 1, octaves do
         total = total + noise3D(x * frequency + ox, y * frequency + oy, z * frequency + oz) * amplitude
@@ -71,8 +93,7 @@ function Noise.ridged2D(x, y, seed, octaves, persistence, lacunarity)
     local amplitude = 1.0
     local frequency = 1.0
     local maxVal = 0
-    local ox = seed * 1.31
-    local oy = seed * 1.77
+    local ox, oy = seedOffsets2D(seed)
 
     for i = 1, octaves do
         local n = noise2D(x * frequency + ox, y * frequency + oy)

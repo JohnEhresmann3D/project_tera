@@ -7,7 +7,7 @@ local ZL = Constants.Z_LEVELS
 local BLOCK_WATER = Constants.BLOCK_WATER
 local BLOCK_AIR = Constants.BLOCK_AIR
 
-local WATER_LEVEL_Z = 18  -- global water plane (~28% of ZL)
+local WATER_LEVEL_Z = Constants.WATER_LEVEL_Z  -- global water plane (~28% of ZL)
 
 local StageWater = {}
 StageWater.name = "water"

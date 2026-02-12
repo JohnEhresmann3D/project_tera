@@ -5,6 +5,7 @@ Constants.CHUNK_W = 32
 Constants.CHUNK_H = 32
 Constants.Z_LEVELS = 64
 Constants.SURFACE_Z = 24
+Constants.WATER_LEVEL_Z = 18
 
 -- Isometric tile dimensions (pixels)
 Constants.TILE_W = 64
@@ -51,6 +52,9 @@ Constants.LOAD_RADIUS = 10
 Constants.CACHE_RADIUS = 14
 Constants.MAX_CACHED = 500
 Constants.GEN_BUDGET_MS = 4.0
+Constants.CACHE_STALE_FRAMES = 1800
+Constants.CACHE_HARD_EVICT_MARGIN = 6
+Constants.CACHE_MAX_FORCED_EVICT_PER_FRAME = 8
 
 -- Player
 Constants.PLAYER_SPEED = 6.0

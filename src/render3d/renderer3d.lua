@@ -21,6 +21,8 @@ local shader
 local canvas
 local depthCanvas
 local screenW, screenH
+local renderScale = 1.0
+local canvasW, canvasH
 
 -- Pre-allocated neighbor offsets (avoid table creation per call)
 local NEIGHBOR_OFFSETS = {{-1,0},{1,0},{0,-1},{0,1}}
@@ -40,14 +42,34 @@ function Renderer3D.init()
 end
 
 function Renderer3D._createCanvases(w, h)
-    canvas = love.graphics.newCanvas(w, h)
-    depthCanvas = love.graphics.newCanvas(w, h, {format = "depth24"})
+    local sw = math.max(1, math.floor(w * renderScale + 0.5))
+    local sh = math.max(1, math.floor(h * renderScale + 0.5))
+    canvasW, canvasH = sw, sh
+    canvas = love.graphics.newCanvas(sw, sh)
+    depthCanvas = love.graphics.newCanvas(sw, sh, {format = "depth24"})
 end
 
 function Renderer3D.resize(w, h)
     screenW = w
     screenH = h
     Renderer3D._createCanvases(w, h)
+end
+
+function Renderer3D.setRenderScale(scale)
+    local s = tonumber(scale) or 1.0
+    if s < 0.5 then s = 0.5 end
+    if s > 1.0 then s = 1.0 end
+    if math.abs(s - renderScale) < 0.001 then
+        return
+    end
+    renderScale = s
+    if screenW and screenH then
+        Renderer3D._createCanvases(screenW, screenH)
+    end
+end
+
+function Renderer3D.getRenderScale()
+    return renderScale
 end
 
 ---------------------------------------------------------------------------
@@ -121,6 +143,8 @@ end
 
 -- Reusable list for dirty chunk rebuild prioritization
 local dirtyList = {}
+local visibleList = {}
+local rebuildSet = {}
 
 function Renderer3D.draw(camera3d, chunkManager, player)
     -- Update camera matrices
@@ -141,7 +165,7 @@ function Renderer3D.draw(camera3d, chunkManager, player)
     -- Draw celestial bodies onto canvas BEFORE terrain.
     -- They sit at depth=1.0 (cleared), so terrain drawn afterward
     -- naturally occludes them via depth testing.
-    Sky.draw(screenW, screenH, camera3d)
+    Sky.draw(canvasW or screenW, canvasH or screenH, camera3d)
 
     love.graphics.setShader(shader)
     love.graphics.setDepthMode("lequal", true)
@@ -161,21 +185,22 @@ function Renderer3D.draw(camera3d, chunkManager, player)
     local camCx = floor(px / CW)
     local camCy = floor(py / CH)
 
-    local activeR   = Constants.ACTIVE_RADIUS
-    local viewR     = Constants.LOAD_RADIUS
+    local activeR   = chunkManager.activeRadius or Constants.ACTIVE_RADIUS
+    local viewR     = chunkManager.loadRadius or Constants.LOAD_RADIUS
     local activeRSq = activeR * activeR
     local viewRSq   = viewR * viewR
 
     local meshesDrawn = 0
     local meshesTotal = 0
     local meshRebuilds = 0
-    local maxRebuilds = Constants.MAX_MESH_REBUILDS_PER_FRAME
+    local maxRebuilds = chunkManager.meshRebuildBudget or Constants.MAX_MESH_REBUILDS_PER_FRAME
 
     -- Create neighbor lookup once for all mesh rebuilds this frame
     local neighborFunc = createNeighborFunc(chunkManager)
 
     -- Collect dirty chunks for prioritized rebuilds
     local dirtyCount = 0
+    local visibleCount = 0
 
     -- Iterate full view radius — drawing cached meshes is cheap
     for dy = -viewR, viewR do
@@ -206,10 +231,14 @@ function Renderer3D.draw(camera3d, chunkManager, player)
                     if Frustum.testAABB(planes, minX, minY, minZ, maxX, maxY, maxZ) then
                         -- Draw cached mesh (always — this is cheap)
                         local mesh = chunk._mesh3d
-                        if mesh then
-                            love.graphics.draw(mesh)
-                            meshesDrawn = meshesDrawn + 1
+                        visibleCount = visibleCount + 1
+                        local v = visibleList[visibleCount]
+                        if not v then
+                            v = {}
+                            visibleList[visibleCount] = v
                         end
+                        v.chunk = chunk
+                        v.mesh = mesh
 
                         -- Decide whether this chunk should be rebuilt:
                         --   Active zone: rebuild any dirty mesh
@@ -251,6 +280,19 @@ function Renderer3D.draw(camera3d, chunkManager, player)
     -- Rebuild closest dirty chunks within budget
     local rebuildsThisFrame = min(dirtyCount, maxRebuilds)
     for i = 1, rebuildsThisFrame do
+        rebuildSet[dirtyList[i].chunk] = true
+    end
+
+    -- Draw cached meshes for chunks not being rebuilt this frame.
+    for i = 1, visibleCount do
+        local v = visibleList[i]
+        if v.mesh and not rebuildSet[v.chunk] then
+            love.graphics.draw(v.mesh)
+            meshesDrawn = meshesDrawn + 1
+        end
+    end
+
+    for i = 1, rebuildsThisFrame do
         local chunk = dirtyList[i].chunk
         Renderer3D.ensureMesh(chunk, chunkManager, neighborFunc)
         meshRebuilds = meshRebuilds + 1
@@ -265,7 +307,12 @@ function Renderer3D.draw(camera3d, chunkManager, player)
 
     -- Clear references to avoid holding chunks across frames
     for i = 1, dirtyCount do
+        rebuildSet[dirtyList[i].chunk] = nil
         dirtyList[i].chunk = nil
+    end
+    for i = 1, visibleCount do
+        visibleList[i].chunk = nil
+        visibleList[i].mesh = nil
     end
 
     -- Restore state
@@ -276,7 +323,9 @@ function Renderer3D.draw(camera3d, chunkManager, player)
 
     -- Blit 3D canvas to screen
     love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.draw(canvas, 0, 0)
+    local sx = screenW / (canvasW or screenW)
+    local sy = screenH / (canvasH or screenH)
+    love.graphics.draw(canvas, 0, 0, 0, sx, sy)
 
     -- Store stats for HUD
     Renderer3D._meshesDrawn = meshesDrawn
@@ -290,7 +339,7 @@ end
 
 function Renderer3D.drawHUD(player, camera3d, chunkManager)
     love.graphics.setColor(0, 0, 0, 0.6)
-    love.graphics.rectangle("fill", 4, 4, 360, 138, 4)
+    love.graphics.rectangle("fill", 4, 4, 500, 192, 4)
 
     love.graphics.setColor(1, 1, 1, 1)
     local tx, ty, tz = player:getTilePos()
@@ -298,6 +347,9 @@ function Renderer3D.drawHUD(player, camera3d, chunkManager)
     local cy = floor(ty / CH)
     local fps = love.timer.getFPS()
     local loadedChunks = chunkManager:getLoadedCount()
+    local worldSeed = chunkManager.worldSeed or 0
+    local perf = chunkManager.getPerfStats and chunkManager:getPerfStats() or nil
+    local tierName = chunkManager.perfTierName or "custom"
 
     local yawDeg = math.deg(camera3d.yaw) % 360
     local pitchDeg = math.deg(camera3d.pitch)
@@ -311,7 +363,12 @@ function Renderer3D.drawHUD(player, camera3d, chunkManager)
         Renderer3D._meshesDrawn or 0, Renderer3D._meshesTotal or 0,
         Renderer3D._meshRebuilds or 0), 10, 82)
     love.graphics.print(string.format("Ambient: %.0f%%", Sky.getAmbientLevel() * 100), 10, 100)
-    love.graphics.print("WASD:move Shift:run Space:jump F:fly R:regen Tab:mouse", 10, 118)
+    love.graphics.print(string.format("Seed: %d", worldSeed), 10, 118)
+    love.graphics.print(string.format("Tier:%s RenderScale:%.2f", tierName, Renderer3D.getRenderScale()), 10, 136)
+    if perf then
+        love.graphics.print(string.format("ChunkQ:%d Gen:%d Evict:%d", perf.queue, perf.generated, perf.evicted), 10, 154)
+    end
+    love.graphics.print("WASD:move Shift:run Space:jump F:fly R:regen Tab:mouse F8:noise F9:tier", 10, 172)
 
     -- Crosshair
     local sw = love.graphics.getWidth()
