@@ -394,7 +394,7 @@ function Renderer3D.drawHUD(player, camera3d, chunkManager)
     if perf then
         love.graphics.print(string.format("ChunkQ:%d Gen:%d Evict:%d", perf.queue, perf.generated, perf.evicted), 10, 154)
     end
-    love.graphics.print("WASD:move Shift:run Space:jump F:fly R:regen Tab:mouse F8:noise F9:tier", 10, 172)
+    love.graphics.print("WASD:move Shift:run Space:jump F:fly R:regen Tab:mouse F8:noise F9:tier F10:render", 10, 172)
 
     -- Crosshair
     local sw = love.graphics.getWidth()

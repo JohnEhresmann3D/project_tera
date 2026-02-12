@@ -1,6 +1,7 @@
 local Constants = require("src.constants")
 local Camera3D = require("src.render3d.camera3d")
 local Renderer3D = require("src.render3d.renderer3d")
+local RendererVS = require("src.render_voxelspace.renderer")
 local Sky = require("src.render3d.sky")
 local DebugOverlay = require("src.render.debug_overlay")
 local Player3D = require("src.player.player3d")
@@ -103,6 +104,7 @@ function PlayingState.new(stateManager)
         chunkManager = nil,
         worldSeed = Constants.DEFAULT_SEED,
         perfTier = 2,
+        renderMode = "mesh3d",
         fpsEma = 60,
         adaptiveTimer = 0,
         adaptiveCooldown = 0,
@@ -126,6 +128,15 @@ function PlayingState:_applyPerfTier(tierIndex)
     self.chunkManager.perfTierName = tier.name
 
     Renderer3D.setRenderScale(tier.renderScale)
+
+    local voxelQuality = {
+        ultra =  { columnStep = 1, depthFar = 900, depthStep = 1.0, depthGrowth = 0.016, projScale = 390 },
+        high =   { columnStep = 1, depthFar = 760, depthStep = 1.1, depthGrowth = 0.018, projScale = 370 },
+        medium = { columnStep = 2, depthFar = 620, depthStep = 1.3, depthGrowth = 0.022, projScale = 350 },
+        low =    { columnStep = 2, depthFar = 520, depthStep = 1.8, depthGrowth = 0.027, projScale = 330 },
+        mobile = { columnStep = 3, depthFar = 420, depthStep = 2.2, depthGrowth = 0.030, projScale = 310 },
+    }
+    RendererVS.setQuality(voxelQuality[tier.name] or voxelQuality.medium)
 end
 
 function PlayingState:_initialPerfTier()
@@ -149,6 +160,8 @@ function PlayingState:_initWorld(seed)
     self:_applyPerfTier(self:_initialPerfTier())
 
     Renderer3D.init()
+    RendererVS.init(self.worldSeed)
+    RendererVS.resize(love.graphics.getWidth(), love.graphics.getHeight())
     Input3D.init(self.camera3d)
     DebugOverlay.mode3d = true
 
@@ -197,9 +210,15 @@ function PlayingState:update(dt)
 end
 
 function PlayingState:draw()
-    Renderer3D.draw(self.camera3d, self.chunkManager, self.player)
+    if self.renderMode == "voxelspace32" then
+        RendererVS.draw(self.camera3d, self.player)
+    else
+        Renderer3D.draw(self.camera3d, self.chunkManager, self.player)
+    end
     Renderer3D.drawHUD(self.player, self.camera3d, self.chunkManager)
     DebugOverlay.draw(self.camera3d, self.chunkManager, self.player)
+    love.graphics.setColor(1, 0.9, 0.2, 1)
+    love.graphics.print("Render: " .. self.renderMode .. " (F10 toggle)", 10, 210)
 
     if DebugOverlay.activeMode > 0 then
         love.graphics.setColor(1, 1, 0, 1)
@@ -250,6 +269,12 @@ function PlayingState:keypressed(key)
         local nextTier = self.perfTier + 1
         if nextTier > #PERF_TIERS then nextTier = 1 end
         self:_applyPerfTier(nextTier)
+    elseif key == "f10" then
+        if self.renderMode == "mesh3d" then
+            self.renderMode = "voxelspace32"
+        else
+            self.renderMode = "mesh3d"
+        end
     elseif key == "r" then
         self:_initWorld(self.worldSeed + 1)
     end
@@ -259,6 +284,7 @@ function PlayingState:resize(w, h)
     if self.camera3d then
         self.camera3d:resize(w, h)
         Renderer3D.resize(w, h)
+        RendererVS.resize(w, h)
     end
 end
 
