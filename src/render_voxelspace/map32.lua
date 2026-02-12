@@ -57,6 +57,7 @@ function Map32.new(seed, size, spacing)
     self.terrainHeights = {}
     self.waterDepths = {}
     self.colors = {}
+    self.floorColors = {}
 
     local water = Constants.WATER_LEVEL_Z
     local hScale = 255 / math.max(1, Constants.Z_LEVELS - 1)
@@ -71,19 +72,32 @@ function Map32.new(seed, size, spacing)
             -- raw terrain noise can look too jagged at distance.
             local eSmooth = sampleSmoothedElevation(self.seed, wx, wy, self.spacing * 3)
             local surf = TerrainFields.surfaceZFromElevation(eSmooth)
-            self.terrainHeights[i] = floor(surf * hScale + 0.5)
+            local terrainSurf = surf
 
             local r, g, b
             if surf <= water then
-                local rawDepth = water - surf
+                -- Deepen underwater terrain in VoxelSpace so oceans read as true basins.
+                local basinN = (Noise.fbm2D(wx * 0.0018 + 1200, wy * 0.0018 + 1200, self.seed + 41000, 3, 0.5) + 1) * 0.5
+                local trenchN = (Noise.fbm2D(wx * 0.0065 + 3500, wy * 0.0065 + 3500, self.seed + 42000, 2, 0.5) + 1) * 0.5
+                local trench = max(0, trenchN - 0.58) / 0.42
+                local rawDepth = (water - surf) + basinN * 8.0 + trench * trench * 16.0
+                local floorZ = max(1, water - rawDepth)
+                terrainSurf = floorZ
                 local d = clamp01(rawDepth / max(1, water))
                 local band = floor(d * WATER_BAND_LEVELS + 0.5) / WATER_BAND_LEVELS
                 -- Layered, stepped water shades (shallows -> deep ocean).
                 r = lerp(0.09, 0.03, band)
                 g = lerp(0.26, 0.14, band)
                 b = lerp(0.60, 0.44, band)
+                local floorBand = clamp01((water - floorZ) / max(1, water))
+                self.floorColors[i] = {
+                    lerp(0.62, 0.28, floorBand),
+                    lerp(0.58, 0.34, floorBand),
+                    lerp(0.42, 0.28, floorBand),
+                }
                 self.heights[i] = floor(water * hScale + 0.5)
-                self.waterDepths[i] = rawDepth
+                self.terrainHeights[i] = floor(terrainSurf * hScale + 0.5)
+                self.waterDepths[i] = water - floorZ
             else
                 local landH = clamp01((surf - water) / max(1, (Constants.Z_LEVELS - water)))
                 if surf < water + 3 then
@@ -120,6 +134,8 @@ function Map32.new(seed, size, spacing)
                         b = b * 0.90
                     end
                 end
+                self.floorColors[i] = { r, g, b }
+                self.terrainHeights[i] = floor(terrainSurf * hScale + 0.5)
                 self.heights[i] = self.terrainHeights[i]
                 self.waterDepths[i] = 0
             end
@@ -165,18 +181,29 @@ local function sampleScalar(self, values, wx, wy)
     return lerp(hx0, hx1, ty), i00, i10, i01, i11, tx, ty
 end
 
-function Map32:sample(wx, wy)
-    local h, i00, i10, i01, i11, tx, ty = sampleScalar(self, self.heights, wx, wy)
-
-    local c00 = self.colors[i00]
-    local c10 = self.colors[i10]
-    local c01 = self.colors[i01]
-    local c11 = self.colors[i11]
+local function sampleColor(self, values, i00, i10, i01, i11, tx, ty)
+    local c00 = values[i00]
+    local c10 = values[i10]
+    local c01 = values[i01]
+    local c11 = values[i11]
 
     local r = lerp(lerp(c00[1], c10[1], tx), lerp(c01[1], c11[1], tx), ty)
     local g = lerp(lerp(c00[2], c10[2], tx), lerp(c01[2], c11[2], tx), ty)
     local b = lerp(lerp(c00[3], c10[3], tx), lerp(c01[3], c11[3], tx), ty)
+    return r, g, b
+end
 
+function Map32:sampleColumn(wx, wy)
+    local h, i00, i10, i01, i11, tx, ty = sampleScalar(self, self.heights, wx, wy)
+    local floorH = sampleScalar(self, self.terrainHeights, wx, wy)
+    local depth = sampleScalar(self, self.waterDepths, wx, wy)
+    local wr, wg, wb = sampleColor(self, self.colors, i00, i10, i01, i11, tx, ty)
+    local fr, fg, fb = sampleColor(self, self.floorColors, i00, i10, i01, i11, tx, ty)
+    return h, wr, wg, wb, floorH, fr, fg, fb, depth
+end
+
+function Map32:sample(wx, wy)
+    local h, r, g, b = self:sampleColumn(wx, wy)
     return h, r, g, b
 end
 

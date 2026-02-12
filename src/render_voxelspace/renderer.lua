@@ -38,25 +38,18 @@ local function hash01(a, b)
     return (n % 1024) / 1023
 end
 
-local function sampleMicro(mapInst, wx, wy, subdiv)
+local function sampleMicro(wx, wy, subdiv)
     if subdiv <= 1 then
-        return mapInst:sample(wx, wy)
+        return wx, wy, 1.0
     end
 
     -- Snap lookup to a tiny world grid so nearby terrain reads as "micro blocks"
     -- instead of a smooth interpolated ribbon.
-    local cell = mapInst.spacing / subdiv
+    local cell = map.spacing / subdiv
     local sx = floor(wx / cell) * cell + cell * 0.5
     local sy = floor(wy / cell) * cell + cell * 0.5
-    local h, r, g, b = mapInst:sample(sx, sy)
-
-    -- Quantize height in map-space units for visible stepped micro layers.
-    local hStep = max(0.25, (255 / max(1, Constants.Z_LEVELS - 1)) / subdiv)
-    h = floor(h / hStep + 0.5) * hStep
-
-    -- Subtle deterministic tint variation per micro cell to improve block separation.
     local shade = 0.94 + hash01(floor(sx * 10 + 0.5), floor(sy * 10 + 0.5)) * 0.12
-    return h, r * shade, g * shade, b * shade
+    return sx, sy, shade
 end
 
 local function ensureYBuffer()
@@ -168,12 +161,20 @@ function RendererVS.draw(camera3d, player)
             local t = (sx - 1) / max(1, screenW - 1)
             local wx = startX + spanX * t
             local wy = startY + spanY * t
-            local h8, cr, cg, cb
+            local sxWorld, syWorld, microShade = wx, wy, 1.0
             if MICRO_ENABLED and z <= MICRO_MID_DEPTH then
                 local subdiv = (z <= MICRO_NEAR_DEPTH) and MICRO_NEAR_SUBDIV or MICRO_MID_SUBDIV
-                h8, cr, cg, cb = sampleMicro(map, wx, wy, subdiv)
-            else
-                h8, cr, cg, cb = map:sample(wx, wy)
+                sxWorld, syWorld, microShade = sampleMicro(wx, wy, subdiv)
+            end
+            local h8, cr, cg, cb, floorH8, fr, fg, fb, waterDepth = map:sampleColumn(sxWorld, syWorld)
+
+            if microShade ~= 1.0 then
+                -- Quantize heights in map-space units for visible stepped micro layers.
+                local hStep = max(0.25, (255 / max(1, Constants.Z_LEVELS - 1)) / MICRO_MID_SUBDIV)
+                h8 = floor(h8 / hStep + 0.5) * hStep
+                floorH8 = floor(floorH8 / hStep + 0.5) * hStep
+                cr, cg, cb = cr * microShade, cg * microShade, cb * microShade
+                fr, fg, fb = fr * microShade, fg * microShade, fb * microShade
             end
 
             local projected = horizon - ((h8 - camHeight) * quality.projScale) / z
@@ -185,11 +186,33 @@ function RendererVS.draw(camera3d, player)
                 if underwater then
                     fogMix = min(1.0, fog + 0.22 + underT * 0.28)
                 end
-                local r = cr * (1 - fogMix) + skyR * fogMix
-                local g = cg * (1 - fogMix) + skyG * fogMix
-                local b = cb * (1 - fogMix) + skyB * fogMix
-                love.graphics.setColor(r, g, b, 1)
-                love.graphics.rectangle("fill", sx - 1, top, quality.columnStep, bot - top)
+                if waterDepth > 0.25 then
+                    local floorProjected = horizon - ((floorH8 - camHeight) * quality.projScale) / z
+                    local floorTop = max(top, floorProjected)
+                    if floorTop < bot then
+                        local frFog = fr * (1 - fogMix) + skyR * fogMix
+                        local fgFog = fg * (1 - fogMix) + skyG * fogMix
+                        local fbFog = fb * (1 - fogMix) + skyB * fogMix
+                        love.graphics.setColor(frFog, fgFog, fbFog, 1)
+                        love.graphics.rectangle("fill", sx - 1, floorTop, quality.columnStep, bot - floorTop)
+                    end
+
+                    local wrFog = cr * (1 - fogMix) + skyR * fogMix
+                    local wgFog = cg * (1 - fogMix) + skyG * fogMix
+                    local wbFog = cb * (1 - fogMix) + skyB * fogMix
+                    local depthAlpha = min(0.82, 0.18 + (waterDepth / 22.0) * 0.52)
+                    if underwater then
+                        depthAlpha = min(0.92, depthAlpha + 0.10 + underT * 0.08)
+                    end
+                    love.graphics.setColor(wrFog, wgFog, wbFog, depthAlpha)
+                    love.graphics.rectangle("fill", sx - 1, top, quality.columnStep, bot - top)
+                else
+                    local r = cr * (1 - fogMix) + skyR * fogMix
+                    local g = cg * (1 - fogMix) + skyG * fogMix
+                    local b = cb * (1 - fogMix) + skyB * fogMix
+                    love.graphics.setColor(r, g, b, 1)
+                    love.graphics.rectangle("fill", sx - 1, top, quality.columnStep, bot - top)
+                end
                 local lastX = min(screenW, sx + quality.columnStep - 1)
                 -- Fill all covered columns so stepped rendering still occludes correctly.
                 for xi = sx, lastX do
