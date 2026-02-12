@@ -86,6 +86,15 @@ function RendererVS.setQuality(q)
     if q.fov then quality.fov = q.fov end
 end
 
+function RendererVS.getGroundHeight(wx, wy)
+    if not map then
+        RendererVS.init(Constants.DEFAULT_SEED)
+    end
+    local h8 = map:sample(wx, wy)
+    -- Convert map height byte [0..255] back to world Z surface height.
+    return (h8 / 255.0) * max(1, Constants.Z_LEVELS - 1)
+end
+
 function RendererVS.draw(camera3d, player)
     if not map then
         RendererVS.init(Constants.DEFAULT_SEED)

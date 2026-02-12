@@ -99,14 +99,14 @@ function Player3D:update(dt, camera3d, chunkManager)
         self.wx = self.wx + mx * moveSpeed * dt
         self.wy = self.wy + my * moveSpeed * dt
         local dz = 0
-        if love.keyboard.isDown("space") then
+        if self.flying and love.keyboard.isDown("space") then
             dz = dz + moveSpeed * dt
         end
-        -- Keep shift descend when flight is active; ctrl always descends.
+        -- Keep shift descend when flight is active; ctrl always descends in flight.
         if self.flying and (love.keyboard.isDown("lshift") or love.keyboard.isDown("rshift")) then
             dz = dz - moveSpeed * dt
         end
-        if love.keyboard.isDown("lctrl") or love.keyboard.isDown("rctrl") then
+        if self.flying and (love.keyboard.isDown("lctrl") or love.keyboard.isDown("rctrl")) then
             dz = dz - moveSpeed * dt
         end
         self.wz = self.wz + dz
