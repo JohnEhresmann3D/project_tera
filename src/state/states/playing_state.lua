@@ -284,7 +284,7 @@ function PlayingState:keypressed(key)
         local nextTier = self.perfTier + 1
         if nextTier > #PERF_TIERS then nextTier = 1 end
         self:_applyPerfTier(nextTier)
-    elseif key == "f10" then
+    elseif key == "f10" or key == "v" then
         -- Fast renderer A/B testing during gameplay.
         if self.renderMode == "mesh3d" then
             self.renderMode = "voxelspace32"

@@ -69,6 +69,20 @@ Constants.FOG_START = 120.0
 Constants.FOG_END = 280.0
 Constants.MAX_MESH_REBUILDS_PER_FRAME = 6
 
+-- Experimental micro-voxel terrain styling (mesh3d).
+-- Splits exposed top faces into tiny raised sub-cubes without changing world data.
+Constants.MICRO_VOXEL_SURFACE = true
+Constants.MICRO_VOXEL_SUBDIV = 2
+Constants.MICRO_VOXEL_GAP = 0.16
+Constants.MICRO_VOXEL_HEIGHT = 0.28
+Constants.MICRO_VOXEL_NEAR_RADIUS = 3
+Constants.MICRO_VOXEL_FAR_RADIUS = 5
+Constants.MICRO_VOXEL_NEAR_SUBDIV = 3
+Constants.MICRO_VOXEL_MID_SUBDIV = 2
+Constants.MICRO_VOXEL_REBUILD_NEAR = 3
+Constants.MICRO_VOXEL_REBUILD_MID = 2
+Constants.MICRO_VOXEL_REBUILD_FAR = 1
+
 -- World seed (default)
 Constants.DEFAULT_SEED = 42
 

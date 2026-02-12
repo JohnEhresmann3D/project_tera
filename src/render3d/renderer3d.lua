@@ -35,6 +35,7 @@ local canvasW, canvasH
 
 -- Pre-allocated neighbor offsets (avoid table creation per call)
 local NEIGHBOR_OFFSETS = {{-1,0},{1,0},{0,-1},{0,1}}
+local variantBuildOpts
 
 ---------------------------------------------------------------------------
 -- Init
@@ -115,8 +116,10 @@ end
 -- Ensure a chunk has an up-to-date 3D mesh
 ---------------------------------------------------------------------------
 
-function Renderer3D.ensureMesh(chunk, chunkManager, neighborFunc)
-    if not chunk._mesh3dDirty and chunk._mesh3d then
+function Renderer3D.ensureMesh(chunk, chunkManager, neighborFunc, variantKey)
+    variantKey = variantKey or "normal"
+    local variantMatches = (chunk._mesh3dVariantKey == variantKey)
+    if not chunk._mesh3dDirty and chunk._mesh3d and variantMatches then
         return chunk._mesh3d
     end
 
@@ -129,8 +132,9 @@ function Renderer3D.ensureMesh(chunk, chunkManager, neighborFunc)
     end
 
     neighborFunc = neighborFunc or createNeighborFunc(chunkManager)
-    chunk._mesh3d = MeshBuilder.build(chunk, neighborFunc)
+    chunk._mesh3d = MeshBuilder.build(chunk, neighborFunc, variantBuildOpts(variantKey))
     chunk._mesh3dDirty = false
+    chunk._mesh3dVariantKey = variantKey
 
     if firstBuild then
         markNeighborsDirty(chunkManager, chunk.cx, chunk.cy)
@@ -153,6 +157,7 @@ end
 -- Reusable list for dirty chunk rebuild prioritization
 local dirtyList = {}
 local visibleList = {}
+local rebuildList = {}
 local rebuildSet = {}
 local lastYaw = nil
 local lastPitch = nil
@@ -160,6 +165,61 @@ local lastPitch = nil
 local TURN_THROTTLE_THRESHOLD = 0.012
 local TURN_REBUILD_SCALE = 0.5
 local FIRST_BUILD_RADIUS_BONUS = 2
+local MICRO_LOD_ENABLED = not not Constants.MICRO_VOXEL_SURFACE
+local MICRO_NEAR_R = math.max(1, Constants.MICRO_VOXEL_NEAR_RADIUS or 3)
+local MICRO_MID_R = math.max(MICRO_NEAR_R, Constants.MICRO_VOXEL_FAR_RADIUS or 5)
+local MICRO_NEAR_SQ = MICRO_NEAR_R * MICRO_NEAR_R
+local MICRO_MID_SQ = MICRO_MID_R * MICRO_MID_R
+local MICRO_HYST_SQ = 1
+
+local MICRO_NEAR_SUBDIV = math.max(1, Constants.MICRO_VOXEL_NEAR_SUBDIV or 3)
+local MICRO_MID_SUBDIV = math.max(1, Constants.MICRO_VOXEL_MID_SUBDIV or 2)
+
+local MICRO_REBUILD_NEAR = math.max(0, Constants.MICRO_VOXEL_REBUILD_NEAR or 3)
+local MICRO_REBUILD_MID = math.max(0, Constants.MICRO_VOXEL_REBUILD_MID or 2)
+local MICRO_REBUILD_FAR = math.max(0, Constants.MICRO_VOXEL_REBUILD_FAR or 1)
+
+variantBuildOpts = function(variantKey)
+    if variantKey == "micro_near" then
+        return { microSurface = true, microSubdiv = MICRO_NEAR_SUBDIV }
+    elseif variantKey == "micro_mid" then
+        return { microSurface = true, microSubdiv = MICRO_MID_SUBDIV }
+    end
+    return { microSurface = false }
+end
+
+local function chooseSurfaceVariant(chunk, distSq)
+    if not MICRO_LOD_ENABLED then
+        return "normal", 3
+    end
+
+    -- Hysteresis around ring boundaries to reduce variant thrash.
+    local current = chunk._mesh3dVariantKey
+    if current == "micro_near" and distSq <= (MICRO_NEAR_SQ + MICRO_HYST_SQ) then
+        return "micro_near", 1
+    end
+    if current == "micro_mid" and distSq <= (MICRO_MID_SQ + MICRO_HYST_SQ) and distSq > (MICRO_NEAR_SQ - MICRO_HYST_SQ) then
+        return "micro_mid", 2
+    end
+
+    if distSq <= MICRO_NEAR_SQ then
+        return "micro_near", 1
+    elseif distSq <= MICRO_MID_SQ then
+        return "micro_mid", 2
+    end
+    return "normal", 3
+end
+
+local function splitRebuildBudgets(totalBudget)
+    local nearB = math.min(MICRO_REBUILD_NEAR, totalBudget)
+    local left = totalBudget - nearB
+    local midB = math.min(MICRO_REBUILD_MID, left)
+    left = left - midB
+    local farB = math.min(MICRO_REBUILD_FAR, left)
+    left = left - farB
+    nearB = nearB + left
+    return nearB, midB, farB
+end
 
 function Renderer3D.draw(camera3d, chunkManager, player)
     -- Update camera matrices
@@ -211,6 +271,12 @@ function Renderer3D.draw(camera3d, chunkManager, player)
     local meshesTotal = 0
     local meshRebuilds = 0
     local maxRebuilds = chunkManager.meshRebuildBudget or Constants.MAX_MESH_REBUILDS_PER_FRAME
+    local nearVisible = 0
+    local midVisible = 0
+    local farVisible = 0
+    local nearRebuilds = 0
+    local midRebuilds = 0
+    local farRebuilds = 0
 
     local turningFast = false
     if lastYaw then
@@ -262,6 +328,18 @@ function Renderer3D.draw(camera3d, chunkManager, player)
                     local maxZ = (cy + 1) * CH
 
                     if Frustum.testAABB(planes, minX, minY, minZ, maxX, maxY, maxZ) then
+                        local wantVariant, ring = chooseSurfaceVariant(chunk, distSq)
+                        if ring == 1 then
+                            nearVisible = nearVisible + 1
+                        elseif ring == 2 then
+                            midVisible = midVisible + 1
+                        else
+                            farVisible = farVisible + 1
+                        end
+
+                        if chunk._mesh3d and chunk._mesh3dVariantKey ~= wantVariant then
+                            chunk._mesh3dDirty = true
+                        end
                         -- Draw cached mesh (always — this is cheap)
                         local mesh = chunk._mesh3d
                         visibleCount = visibleCount + 1
@@ -272,6 +350,7 @@ function Renderer3D.draw(camera3d, chunkManager, player)
                         end
                         v.chunk = chunk
                         v.mesh = mesh
+                        v.wantVariant = wantVariant
 
                         -- Decide whether this chunk should be rebuilt:
                         --   Active zone: rebuild any dirty mesh
@@ -289,6 +368,8 @@ function Renderer3D.draw(camera3d, chunkManager, player)
                                 end
                                 entry.chunk = chunk
                                 entry.distSq = distSq
+                                entry.ring = ring
+                                entry.wantVariant = wantVariant
                             end
                         end
                     end
@@ -313,9 +394,31 @@ function Renderer3D.draw(camera3d, chunkManager, player)
 
     -- Rebuild closest dirty chunks within budget.
     -- This is the key frame-time guardrail for CPU-side meshing.
-    local rebuildsThisFrame = min(dirtyCount, maxRebuilds)
-    for i = 1, rebuildsThisFrame do
-        rebuildSet[dirtyList[i].chunk] = true
+    local rebuildsThisFrame = 0
+    local nearBudget, midBudget, farBudget = splitRebuildBudgets(min(dirtyCount, maxRebuilds))
+    for i = 1, dirtyCount do
+        if rebuildsThisFrame >= maxRebuilds then break end
+        local entry = dirtyList[i]
+        local selected = false
+        if entry.ring == 1 and nearBudget > 0 then
+            nearBudget = nearBudget - 1
+            nearRebuilds = nearRebuilds + 1
+            selected = true
+        elseif entry.ring == 2 and midBudget > 0 then
+            midBudget = midBudget - 1
+            midRebuilds = midRebuilds + 1
+            selected = true
+        elseif entry.ring == 3 and farBudget > 0 then
+            farBudget = farBudget - 1
+            farRebuilds = farRebuilds + 1
+            selected = true
+        end
+
+        if selected then
+            rebuildsThisFrame = rebuildsThisFrame + 1
+            rebuildList[rebuildsThisFrame] = entry
+            rebuildSet[entry.chunk] = true
+        end
     end
 
     -- Draw cached meshes for chunks not being rebuilt this frame.
@@ -328,8 +431,9 @@ function Renderer3D.draw(camera3d, chunkManager, player)
     end
 
     for i = 1, rebuildsThisFrame do
-        local chunk = dirtyList[i].chunk
-        Renderer3D.ensureMesh(chunk, chunkManager, neighborFunc)
+        local entry = rebuildList[i]
+        local chunk = entry.chunk
+        Renderer3D.ensureMesh(chunk, chunkManager, neighborFunc, entry.wantVariant)
         meshRebuilds = meshRebuilds + 1
 
         -- Draw the newly built mesh
@@ -344,10 +448,16 @@ function Renderer3D.draw(camera3d, chunkManager, player)
     for i = 1, dirtyCount do
         rebuildSet[dirtyList[i].chunk] = nil
         dirtyList[i].chunk = nil
+        dirtyList[i].wantVariant = nil
+        dirtyList[i].ring = nil
+    end
+    for i = 1, rebuildsThisFrame do
+        rebuildList[i] = nil
     end
     for i = 1, visibleCount do
         visibleList[i].chunk = nil
         visibleList[i].mesh = nil
+        visibleList[i].wantVariant = nil
     end
 
     -- Restore state
@@ -366,6 +476,12 @@ function Renderer3D.draw(camera3d, chunkManager, player)
     Renderer3D._meshesDrawn = meshesDrawn
     Renderer3D._meshesTotal = meshesTotal
     Renderer3D._meshRebuilds = meshRebuilds
+    Renderer3D._lodNearVisible = nearVisible
+    Renderer3D._lodMidVisible = midVisible
+    Renderer3D._lodFarVisible = farVisible
+    Renderer3D._lodNearRebuilds = nearRebuilds
+    Renderer3D._lodMidRebuilds = midRebuilds
+    Renderer3D._lodFarRebuilds = farRebuilds
 end
 
 ---------------------------------------------------------------------------
@@ -374,7 +490,7 @@ end
 
 function Renderer3D.drawHUD(player, camera3d, chunkManager)
     love.graphics.setColor(0, 0, 0, 0.6)
-    love.graphics.rectangle("fill", 4, 4, 500, 192, 4)
+    love.graphics.rectangle("fill", 4, 4, 500, 212, 4)
 
     love.graphics.setColor(1, 1, 1, 1)
     local tx, ty, tz = player:getTilePos()
@@ -403,7 +519,10 @@ function Renderer3D.drawHUD(player, camera3d, chunkManager)
     if perf then
         love.graphics.print(string.format("ChunkQ:%d Gen:%d Evict:%d", perf.queue, perf.generated, perf.evicted), 10, 154)
     end
-    love.graphics.print("WASD:move Shift:run Space:jump F:fly R:regen Tab:mouse F8:noise F9:tier F10:render", 10, 172)
+    love.graphics.print(string.format("LOD N/M/F: %d/%d/%d  Reb N/M/F: %d/%d/%d",
+        Renderer3D._lodNearVisible or 0, Renderer3D._lodMidVisible or 0, Renderer3D._lodFarVisible or 0,
+        Renderer3D._lodNearRebuilds or 0, Renderer3D._lodMidRebuilds or 0, Renderer3D._lodFarRebuilds or 0), 10, 172)
+    love.graphics.print("WASD:move Shift:run Space:jump F:fly R:regen Tab:mouse F8:noise F9:tier F10/V:render", 10, 190)
 
     -- Crosshair
     local sw = love.graphics.getWidth()
@@ -418,3 +537,4 @@ function Renderer3D.drawHUD(player, camera3d, chunkManager)
 end
 
 return Renderer3D
+

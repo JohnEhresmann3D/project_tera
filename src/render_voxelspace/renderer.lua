@@ -8,6 +8,7 @@ local max = math.max
 local min = math.min
 local sqrt = math.sqrt
 local tan = math.tan
+local floor = math.floor
 
 local RendererVS = {}
 
@@ -23,6 +24,40 @@ local quality = {
     fov = math.rad(72),
     projScale = 360,
 }
+
+local MICRO_ENABLED = not not Constants.MICRO_VOXEL_SURFACE
+local MICRO_NEAR_SUBDIV = max(1, Constants.MICRO_VOXEL_NEAR_SUBDIV or 3)
+local MICRO_MID_SUBDIV = max(1, Constants.MICRO_VOXEL_MID_SUBDIV or 2)
+local MICRO_NEAR_DEPTH = max(16, (Constants.MICRO_VOXEL_NEAR_RADIUS or 3) * Constants.CHUNK_W)
+local MICRO_MID_DEPTH = max(MICRO_NEAR_DEPTH, (Constants.MICRO_VOXEL_FAR_RADIUS or 5) * Constants.CHUNK_W)
+
+local function hash01(a, b)
+    local n = a * 15731 + b * 789221 + 1376312589
+    n = n % 2147483647
+    if n < 0 then n = n + 2147483647 end
+    return (n % 1024) / 1023
+end
+
+local function sampleMicro(mapInst, wx, wy, subdiv)
+    if subdiv <= 1 then
+        return mapInst:sample(wx, wy)
+    end
+
+    -- Snap lookup to a tiny world grid so nearby terrain reads as "micro blocks"
+    -- instead of a smooth interpolated ribbon.
+    local cell = mapInst.spacing / subdiv
+    local sx = floor(wx / cell) * cell + cell * 0.5
+    local sy = floor(wy / cell) * cell + cell * 0.5
+    local h, r, g, b = mapInst:sample(sx, sy)
+
+    -- Quantize height in map-space units for visible stepped micro layers.
+    local hStep = max(0.25, (255 / max(1, Constants.Z_LEVELS - 1)) / subdiv)
+    h = floor(h / hStep + 0.5) * hStep
+
+    -- Subtle deterministic tint variation per micro cell to improve block separation.
+    local shade = 0.94 + hash01(floor(sx * 10 + 0.5), floor(sy * 10 + 0.5)) * 0.12
+    return h, r * shade, g * shade, b * shade
+end
 
 local function ensureYBuffer()
     -- Per-column "highest already drawn pixel" for hidden-surface removal.
@@ -104,7 +139,13 @@ function RendererVS.draw(camera3d, player)
             local t = (sx - 1) / max(1, screenW - 1)
             local wx = startX + spanX * t
             local wy = startY + spanY * t
-            local h8, cr, cg, cb = map:sample(wx, wy)
+            local h8, cr, cg, cb
+            if MICRO_ENABLED and z <= MICRO_MID_DEPTH then
+                local subdiv = (z <= MICRO_NEAR_DEPTH) and MICRO_NEAR_SUBDIV or MICRO_MID_SUBDIV
+                h8, cr, cg, cb = sampleMicro(map, wx, wy, subdiv)
+            else
+                h8, cr, cg, cb = map:sample(wx, wy)
+            end
 
             local projected = horizon - ((h8 - camHeight) * quality.projScale) / z
             local top = max(0, projected)

@@ -20,9 +20,15 @@ local CH        = Constants.CHUNK_H       -- 32
 local ZL        = Constants.Z_LEVELS      -- 64
 local BLOCK_AIR = Constants.BLOCK_AIR     -- 0
 
+local MICRO_SURFACE = not not Constants.MICRO_VOXEL_SURFACE
+local MICRO_SUBDIV_DEFAULT = math.max(1, Constants.MICRO_VOXEL_SUBDIV or 2)
+local MICRO_GAP = math.max(0, math.min(0.7, Constants.MICRO_VOXEL_GAP or 0.16))
+local MICRO_HEIGHT = math.max(0.08, math.min(0.48, Constants.MICRO_VOXEL_HEIGHT or 0.28))
+
 -- Localize hot functions / math
 local getColor       = BlockRegistry.getColor
 local isTransparent  = BlockRegistry.isTransparent
+local isSolid        = BlockRegistry.isSolid
 local newMesh        = love.graphics.newMesh
 local mathMin        = math.min
 
@@ -52,6 +58,13 @@ local STRUCTURE_BUFFER = 8
 local flatBuf = {}
 local flatLen = 0
 
+local function hash01(a, b, c, d, e)
+    local n = a * 15731 + b * 789221 + c * 1376312589 + d * 8191 + e * 4099
+    n = n % 2147483647
+    if n < 0 then n = n + 2147483647 end
+    return (n % 1024) / 1023
+end
+
 -- Only emit a face if it borders air, or a different transparent block type.
 local function shouldEmitFace(blockId, neighborId)
     if neighborId == BLOCK_AIR then
@@ -75,6 +88,238 @@ local function emitFace(x0,y0,z0, x1,y1,z1, x2,y2,z2,
     flatBuf[i+29]=x4; flatBuf[i+30]=y4; flatBuf[i+31]=z4; flatBuf[i+32]=r; flatBuf[i+33]=g; flatBuf[i+34]=b; flatBuf[i+35]=a
     flatBuf[i+36]=x5; flatBuf[i+37]=y5; flatBuf[i+38]=z5; flatBuf[i+39]=r; flatBuf[i+40]=g; flatBuf[i+41]=b; flatBuf[i+42]=a
     flatLen = i + 42
+end
+
+local function isMicroSurfaceCandidate(blockId)
+    -- Apply micro-shell to opaque solid blocks only.
+    return isSolid(blockId) and (not isTransparent(blockId))
+end
+
+local function emitMicroTop(wx, wy, wz, cr, cg, cb, ca, microSubdiv)
+    local subdiv = math.max(1, microSubdiv or MICRO_SUBDIV_DEFAULT)
+    local cell = 1.0 / subdiv
+    local pad = cell * MICRO_GAP * 0.5
+    local x0 = wx
+    local z0 = wy
+    local yTop = wz + 1
+    local yBot = yTop - MICRO_HEIGHT
+
+    for sy = 0, subdiv - 1 do
+        for sx = 0, subdiv - 1 do
+            local sx0 = x0 + sx * cell + pad
+            local sx1 = x0 + (sx + 1) * cell - pad
+            local sz0 = z0 + sy * cell + pad
+            local sz1 = z0 + (sy + 1) * cell - pad
+
+            if sx1 > sx0 and sz1 > sz0 then
+                local noise = hash01(wx, wy, wz, sx, sy)
+                local shade = 0.92 + noise * 0.16
+                local r = cr * shade
+                local g = cg * shade
+                local b = cb * shade
+
+                -- Top of tiny cube
+                emitFace(
+                    sx0, yTop, sz0,   sx0, yTop, sz1,   sx1, yTop, sz1,
+                    sx0, yTop, sz0,   sx1, yTop, sz1,   sx1, yTop, sz0,
+                    r * BRIGHT_TOP, g * BRIGHT_TOP, b * BRIGHT_TOP, ca)
+
+                -- Four tiny side walls (intentional: gaps make these visible).
+                emitFace(
+                    sx1, yBot, sz0,   sx1, yTop, sz0,   sx1, yTop, sz1,
+                    sx1, yBot, sz0,   sx1, yTop, sz1,   sx1, yBot, sz1,
+                    r * BRIGHT_EAST, g * BRIGHT_EAST, b * BRIGHT_EAST, ca)
+                emitFace(
+                    sx0, yBot, sz1,   sx0, yTop, sz1,   sx0, yTop, sz0,
+                    sx0, yBot, sz1,   sx0, yTop, sz0,   sx0, yBot, sz0,
+                    r * BRIGHT_WEST, g * BRIGHT_WEST, b * BRIGHT_WEST, ca)
+                emitFace(
+                    sx0, yBot, sz1,   sx1, yBot, sz1,   sx1, yTop, sz1,
+                    sx0, yBot, sz1,   sx1, yTop, sz1,   sx0, yTop, sz1,
+                    r * BRIGHT_SOUTH, g * BRIGHT_SOUTH, b * BRIGHT_SOUTH, ca)
+                emitFace(
+                    sx1, yBot, sz0,   sx0, yBot, sz0,   sx0, yTop, sz0,
+                    sx1, yBot, sz0,   sx0, yTop, sz0,   sx1, yTop, sz0,
+                    r * BRIGHT_NORTH, g * BRIGHT_NORTH, b * BRIGHT_NORTH, ca)
+            end
+        end
+    end
+end
+
+local function emitMicroEast(x1, y0, y1, z0, z1, cr, cg, cb, ca, microSubdiv)
+    local subdiv = math.max(1, microSubdiv or MICRO_SUBDIV_DEFAULT)
+    local cell = 1.0 / subdiv
+    local pad = cell * MICRO_GAP * 0.5
+    local xi = x1 - MICRO_HEIGHT
+
+    for sy = 0, subdiv - 1 do
+        for sx = 0, subdiv - 1 do
+            local ya = y0 + sy * cell + pad
+            local yb = y0 + (sy + 1) * cell - pad
+            local za = z0 + sx * cell + pad
+            local zb = z0 + (sx + 1) * cell - pad
+            if yb > ya and zb > za then
+                local shade = 0.92 + hash01(x1, y0, z0, sx, sy) * 0.16
+                local r = cr * shade
+                local g = cg * shade
+                local b = cb * shade
+
+                emitFace(
+                    x1, ya, za,   x1, yb, za,   x1, yb, zb,
+                    x1, ya, za,   x1, yb, zb,   x1, ya, zb,
+                    r * BRIGHT_EAST, g * BRIGHT_EAST, b * BRIGHT_EAST, ca)
+
+                emitFace(
+                    x1, yb, za,   x1, yb, zb,   xi, yb, zb,
+                    x1, yb, za,   xi, yb, zb,   xi, yb, za,
+                    r * BRIGHT_TOP, g * BRIGHT_TOP, b * BRIGHT_TOP, ca)
+                emitFace(
+                    x1, ya, za,   xi, ya, za,   xi, ya, zb,
+                    x1, ya, za,   xi, ya, zb,   x1, ya, zb,
+                    r * BRIGHT_BOTTOM, g * BRIGHT_BOTTOM, b * BRIGHT_BOTTOM, ca)
+                emitFace(
+                    x1, ya, zb,   xi, ya, zb,   xi, yb, zb,
+                    x1, ya, zb,   xi, yb, zb,   x1, yb, zb,
+                    r * BRIGHT_SOUTH, g * BRIGHT_SOUTH, b * BRIGHT_SOUTH, ca)
+                emitFace(
+                    x1, ya, za,   x1, yb, za,   xi, yb, za,
+                    x1, ya, za,   xi, yb, za,   xi, ya, za,
+                    r * BRIGHT_NORTH, g * BRIGHT_NORTH, b * BRIGHT_NORTH, ca)
+            end
+        end
+    end
+end
+
+local function emitMicroWest(x0, y0, y1, z0, z1, cr, cg, cb, ca, microSubdiv)
+    local subdiv = math.max(1, microSubdiv or MICRO_SUBDIV_DEFAULT)
+    local cell = 1.0 / subdiv
+    local pad = cell * MICRO_GAP * 0.5
+    local xi = x0 + MICRO_HEIGHT
+
+    for sy = 0, subdiv - 1 do
+        for sx = 0, subdiv - 1 do
+            local ya = y0 + sy * cell + pad
+            local yb = y0 + (sy + 1) * cell - pad
+            local za = z0 + sx * cell + pad
+            local zb = z0 + (sx + 1) * cell - pad
+            if yb > ya and zb > za then
+                local shade = 0.92 + hash01(x0, y0, z0, sx, sy) * 0.16
+                local r = cr * shade
+                local g = cg * shade
+                local b = cb * shade
+
+                emitFace(
+                    x0, ya, zb,   x0, yb, zb,   x0, yb, za,
+                    x0, ya, zb,   x0, yb, za,   x0, ya, za,
+                    r * BRIGHT_WEST, g * BRIGHT_WEST, b * BRIGHT_WEST, ca)
+
+                emitFace(
+                    x0, yb, za,   x0, yb, zb,   xi, yb, zb,
+                    x0, yb, za,   xi, yb, zb,   xi, yb, za,
+                    r * BRIGHT_TOP, g * BRIGHT_TOP, b * BRIGHT_TOP, ca)
+                emitFace(
+                    x0, ya, za,   xi, ya, za,   xi, ya, zb,
+                    x0, ya, za,   xi, ya, zb,   x0, ya, zb,
+                    r * BRIGHT_BOTTOM, g * BRIGHT_BOTTOM, b * BRIGHT_BOTTOM, ca)
+                emitFace(
+                    x0, ya, zb,   xi, ya, zb,   xi, yb, zb,
+                    x0, ya, zb,   xi, yb, zb,   x0, yb, zb,
+                    r * BRIGHT_SOUTH, g * BRIGHT_SOUTH, b * BRIGHT_SOUTH, ca)
+                emitFace(
+                    x0, ya, za,   x0, yb, za,   xi, yb, za,
+                    x0, ya, za,   xi, yb, za,   xi, ya, za,
+                    r * BRIGHT_NORTH, g * BRIGHT_NORTH, b * BRIGHT_NORTH, ca)
+            end
+        end
+    end
+end
+
+local function emitMicroSouth(x0, x1, y0, y1, z1, cr, cg, cb, ca, microSubdiv)
+    local subdiv = math.max(1, microSubdiv or MICRO_SUBDIV_DEFAULT)
+    local cell = 1.0 / subdiv
+    local pad = cell * MICRO_GAP * 0.5
+    local zi = z1 - MICRO_HEIGHT
+
+    for sy = 0, subdiv - 1 do
+        for sx = 0, subdiv - 1 do
+            local xa = x0 + sx * cell + pad
+            local xb = x0 + (sx + 1) * cell - pad
+            local ya = y0 + sy * cell + pad
+            local yb = y0 + (sy + 1) * cell - pad
+            if xb > xa and yb > ya then
+                local shade = 0.92 + hash01(x0, y0, z1, sx, sy) * 0.16
+                local r = cr * shade
+                local g = cg * shade
+                local b = cb * shade
+
+                emitFace(
+                    xa, ya, z1,   xb, ya, z1,   xb, yb, z1,
+                    xa, ya, z1,   xb, yb, z1,   xa, yb, z1,
+                    r * BRIGHT_SOUTH, g * BRIGHT_SOUTH, b * BRIGHT_SOUTH, ca)
+
+                emitFace(
+                    xa, yb, z1,   xb, yb, z1,   xb, yb, zi,
+                    xa, yb, z1,   xb, yb, zi,   xa, yb, zi,
+                    r * BRIGHT_TOP, g * BRIGHT_TOP, b * BRIGHT_TOP, ca)
+                emitFace(
+                    xa, ya, z1,   xa, ya, zi,   xb, ya, zi,
+                    xa, ya, z1,   xb, ya, zi,   xb, ya, z1,
+                    r * BRIGHT_BOTTOM, g * BRIGHT_BOTTOM, b * BRIGHT_BOTTOM, ca)
+                emitFace(
+                    xb, ya, z1,   xb, ya, zi,   xb, yb, zi,
+                    xb, ya, z1,   xb, yb, zi,   xb, yb, z1,
+                    r * BRIGHT_EAST, g * BRIGHT_EAST, b * BRIGHT_EAST, ca)
+                emitFace(
+                    xa, ya, z1,   xa, yb, z1,   xa, yb, zi,
+                    xa, ya, z1,   xa, yb, zi,   xa, ya, zi,
+                    r * BRIGHT_WEST, g * BRIGHT_WEST, b * BRIGHT_WEST, ca)
+            end
+        end
+    end
+end
+
+local function emitMicroNorth(x0, x1, y0, y1, z0, cr, cg, cb, ca, microSubdiv)
+    local subdiv = math.max(1, microSubdiv or MICRO_SUBDIV_DEFAULT)
+    local cell = 1.0 / subdiv
+    local pad = cell * MICRO_GAP * 0.5
+    local zi = z0 + MICRO_HEIGHT
+
+    for sy = 0, subdiv - 1 do
+        for sx = 0, subdiv - 1 do
+            local xa = x0 + sx * cell + pad
+            local xb = x0 + (sx + 1) * cell - pad
+            local ya = y0 + sy * cell + pad
+            local yb = y0 + (sy + 1) * cell - pad
+            if xb > xa and yb > ya then
+                local shade = 0.92 + hash01(x0, y0, z0, sx, sy) * 0.16
+                local r = cr * shade
+                local g = cg * shade
+                local b = cb * shade
+
+                emitFace(
+                    xb, ya, z0,   xa, ya, z0,   xa, yb, z0,
+                    xb, ya, z0,   xa, yb, z0,   xb, yb, z0,
+                    r * BRIGHT_NORTH, g * BRIGHT_NORTH, b * BRIGHT_NORTH, ca)
+
+                emitFace(
+                    xa, yb, z0,   xb, yb, z0,   xb, yb, zi,
+                    xa, yb, z0,   xb, yb, zi,   xa, yb, zi,
+                    r * BRIGHT_TOP, g * BRIGHT_TOP, b * BRIGHT_TOP, ca)
+                emitFace(
+                    xa, ya, z0,   xa, ya, zi,   xb, ya, zi,
+                    xa, ya, z0,   xb, ya, zi,   xb, ya, z0,
+                    r * BRIGHT_BOTTOM, g * BRIGHT_BOTTOM, b * BRIGHT_BOTTOM, ca)
+                emitFace(
+                    xb, ya, z0,   xb, ya, zi,   xb, yb, zi,
+                    xb, ya, z0,   xb, yb, zi,   xb, yb, z0,
+                    r * BRIGHT_EAST, g * BRIGHT_EAST, b * BRIGHT_EAST, ca)
+                emitFace(
+                    xa, ya, z0,   xa, yb, z0,   xa, yb, zi,
+                    xa, ya, z0,   xa, yb, zi,   xa, ya, zi,
+                    r * BRIGHT_WEST, g * BRIGHT_WEST, b * BRIGHT_WEST, ca)
+            end
+        end
+    end
 end
 
 ---------------------------------------------------------------------------
@@ -103,12 +348,19 @@ local function makeBlockGetter(chunk, getNeighborBlock)
 end
 
 ---------------------------------------------------------------------------
--- MeshBuilder.build(chunk, getNeighborBlock)
+-- MeshBuilder.build(chunk, getNeighborBlock, opts)
 --   Returns a Love2D Mesh ("triangles", "static") or nil if no faces emitted.
 ---------------------------------------------------------------------------
 local MeshBuilder = {}
 
-function MeshBuilder.build(chunk, getNeighborBlock)
+function MeshBuilder.build(chunk, getNeighborBlock, opts)
+    opts = opts or {}
+    local useMicroSurface = MICRO_SURFACE
+    if opts.microSurface ~= nil then
+        useMicroSurface = not not opts.microSurface
+    end
+    local microSubdiv = math.max(1, opts.microSubdiv or MICRO_SUBDIV_DEFAULT)
+
     local blockAt = makeBlockGetter(chunk, getNeighborBlock)
 
     local originX = chunk.cx * CW
@@ -197,15 +449,21 @@ function MeshBuilder.build(chunk, getNeighborBlock)
                         nNorth = blockAt(wx, wy - 1, wz)
                     end
 
+                    local useMicroBlock = useMicroSurface and isMicroSurfaceCandidate(blockId)
+
                     -- TOP face (+Z world / +Y in 3D)
                     if shouldEmitFace(blockId, nTop) then
-                        local r = cr * BRIGHT_TOP
-                        local g = cg * BRIGHT_TOP
-                        local b = cb * BRIGHT_TOP
-                        emitFace(
-                            x0, y1, z0,   x0, y1, z1,   x1, y1, z1,
-                            x0, y1, z0,   x1, y1, z1,   x1, y1, z0,
-                            r, g, b, ca)
+                        if useMicroBlock then
+                            emitMicroTop(wx, wy, wz, cr, cg, cb, ca, microSubdiv)
+                        else
+                            local r = cr * BRIGHT_TOP
+                            local g = cg * BRIGHT_TOP
+                            local b = cb * BRIGHT_TOP
+                            emitFace(
+                                x0, y1, z0,   x0, y1, z1,   x1, y1, z1,
+                                x0, y1, z0,   x1, y1, z1,   x1, y1, z0,
+                                r, g, b, ca)
+                        end
                     end
 
                     -- BOTTOM face (-Z world / -Y in 3D)
@@ -221,46 +479,62 @@ function MeshBuilder.build(chunk, getNeighborBlock)
 
                     -- EAST face (+X world / +X in 3D)
                     if shouldEmitFace(blockId, nEast) then
-                        local r = cr * BRIGHT_EAST
-                        local g = cg * BRIGHT_EAST
-                        local b = cb * BRIGHT_EAST
-                        emitFace(
-                            x1, y0, z0,   x1, y1, z0,   x1, y1, z1,
-                            x1, y0, z0,   x1, y1, z1,   x1, y0, z1,
-                            r, g, b, ca)
+                        if useMicroBlock then
+                            emitMicroEast(x1, y0, y1, z0, z1, cr, cg, cb, ca, microSubdiv)
+                        else
+                            local r = cr * BRIGHT_EAST
+                            local g = cg * BRIGHT_EAST
+                            local b = cb * BRIGHT_EAST
+                            emitFace(
+                                x1, y0, z0,   x1, y1, z0,   x1, y1, z1,
+                                x1, y0, z0,   x1, y1, z1,   x1, y0, z1,
+                                r, g, b, ca)
+                        end
                     end
 
                     -- WEST face (-X world / -X in 3D)
                     if shouldEmitFace(blockId, nWest) then
-                        local r = cr * BRIGHT_WEST
-                        local g = cg * BRIGHT_WEST
-                        local b = cb * BRIGHT_WEST
-                        emitFace(
-                            x0, y0, z1,   x0, y1, z1,   x0, y1, z0,
-                            x0, y0, z1,   x0, y1, z0,   x0, y0, z0,
-                            r, g, b, ca)
+                        if useMicroBlock then
+                            emitMicroWest(x0, y0, y1, z0, z1, cr, cg, cb, ca, microSubdiv)
+                        else
+                            local r = cr * BRIGHT_WEST
+                            local g = cg * BRIGHT_WEST
+                            local b = cb * BRIGHT_WEST
+                            emitFace(
+                                x0, y0, z1,   x0, y1, z1,   x0, y1, z0,
+                                x0, y0, z1,   x0, y1, z0,   x0, y0, z0,
+                                r, g, b, ca)
+                        end
                     end
 
                     -- SOUTH face (+Y world / +Z in 3D)
                     if shouldEmitFace(blockId, nSouth) then
-                        local r = cr * BRIGHT_SOUTH
-                        local g = cg * BRIGHT_SOUTH
-                        local b = cb * BRIGHT_SOUTH
-                        emitFace(
-                            x0, y0, z1,   x1, y0, z1,   x1, y1, z1,
-                            x0, y0, z1,   x1, y1, z1,   x0, y1, z1,
-                            r, g, b, ca)
+                        if useMicroBlock then
+                            emitMicroSouth(x0, x1, y0, y1, z1, cr, cg, cb, ca, microSubdiv)
+                        else
+                            local r = cr * BRIGHT_SOUTH
+                            local g = cg * BRIGHT_SOUTH
+                            local b = cb * BRIGHT_SOUTH
+                            emitFace(
+                                x0, y0, z1,   x1, y0, z1,   x1, y1, z1,
+                                x0, y0, z1,   x1, y1, z1,   x0, y1, z1,
+                                r, g, b, ca)
+                        end
                     end
 
                     -- NORTH face (-Y world / -Z in 3D)
                     if shouldEmitFace(blockId, nNorth) then
-                        local r = cr * BRIGHT_NORTH
-                        local g = cg * BRIGHT_NORTH
-                        local b = cb * BRIGHT_NORTH
-                        emitFace(
-                            x1, y0, z0,   x0, y0, z0,   x0, y1, z0,
-                            x1, y0, z0,   x0, y1, z0,   x1, y1, z0,
-                            r, g, b, ca)
+                        if useMicroBlock then
+                            emitMicroNorth(x0, x1, y0, y1, z0, cr, cg, cb, ca, microSubdiv)
+                        else
+                            local r = cr * BRIGHT_NORTH
+                            local g = cg * BRIGHT_NORTH
+                            local b = cb * BRIGHT_NORTH
+                            emitFace(
+                                x1, y0, z0,   x0, y0, z0,   x0, y1, z0,
+                                x1, y0, z0,   x0, y1, z0,   x1, y1, z0,
+                                r, g, b, ca)
+                        end
                     end
                 end
             end

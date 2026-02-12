@@ -26,7 +26,7 @@ love .
 - `R`: Regenerate world with next seed
 - `F1..F8`: Debug overlay modes (`F8` noise preview)
 - `F9`: Cycle performance tier
-- `F10`: Toggle render mode (`mesh3d` / `voxelspace32`)
+- `F10` (or `V`): Toggle render mode (`mesh3d` / `voxelspace32`)
 - `Esc`: Quit
 
 ## What Exists Today
