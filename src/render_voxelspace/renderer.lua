@@ -2,10 +2,10 @@ local Constants = require("src.constants")
 local Sky = require("src.render3d.sky")
 local Map32 = require("src.render_voxelspace.map32")
 
-local sin = math.sin
-local cos = math.cos
 local max = math.max
 local min = math.min
+local sqrt = math.sqrt
+local tan = math.tan
 
 local RendererVS = {}
 
@@ -27,6 +27,7 @@ local function ensureYBuffer()
         yBuffer[x] = screenH
     end
 end
+
 
 function RendererVS.init(seed)
     map = Map32.new(seed, 256, 2)
@@ -58,17 +59,28 @@ function RendererVS.draw(camera3d, player)
     ensureYBuffer()
 
     local px, py = player:getWorldPos()
-    local yaw = camera3d.yaw
     local pitch = camera3d.pitch
 
     local horizon = screenH * 0.52 + pitch * 230
     local camHeight = player.wz * 4.0 + 32
 
-    local fovHalf = quality.fov * 0.5
-    local leftYaw = yaw - fovHalf
-    local rightYaw = yaw + fovHalf
-    local lxDirX, lxDirY = -sin(leftYaw), -cos(leftYaw)
-    local rxDirX, rxDirY = -sin(rightYaw), -cos(rightYaw)
+    local fx, fy = camera3d:getForwardFlat()
+    local rx, ry = camera3d:getRight()
+    local halfSpan = tan(quality.fov * 0.5)
+
+    local lxDirX = fx - rx * halfSpan
+    local lxDirY = fy - ry * halfSpan
+    local rxDirX = fx + rx * halfSpan
+    local rxDirY = fy + ry * halfSpan
+
+    local lLen = sqrt(lxDirX * lxDirX + lxDirY * lxDirY)
+    local rLen = sqrt(rxDirX * rxDirX + rxDirY * rxDirY)
+    if lLen > 0 then
+        lxDirX, lxDirY = lxDirX / lLen, lxDirY / lLen
+    end
+    if rLen > 0 then
+        rxDirX, rxDirY = rxDirX / rLen, rxDirY / rLen
+    end
 
     local z = 1.0
     local step = quality.depthStep
@@ -87,25 +99,29 @@ function RendererVS.draw(camera3d, player)
             local t = (sx - 1) / max(1, screenW - 1)
             local wx = startX + spanX * t
             local wy = startY + spanY * t
-            local h8, color = map:sample(wx, wy)
+            local h8, cr, cg, cb = map:sample(wx, wy)
 
             local projected = horizon - ((h8 - camHeight) * quality.projScale) / z
             local top = max(0, projected)
             local bot = yBuffer[sx]
 
             if top < bot then
-                local r = color[1] * (1 - fog) + skyR * fog
-                local g = color[2] * (1 - fog) + skyG * fog
-                local b = color[3] * (1 - fog) + skyB * fog
+                local r = cr * (1 - fog) + skyR * fog
+                local g = cg * (1 - fog) + skyG * fog
+                local b = cb * (1 - fog) + skyB * fog
                 love.graphics.setColor(r, g, b, 1)
                 love.graphics.rectangle("fill", sx - 1, top, quality.columnStep, bot - top)
-                yBuffer[sx] = top
+                local lastX = min(screenW, sx + quality.columnStep - 1)
+                for xi = sx, lastX do
+                    yBuffer[xi] = top
+                end
             end
         end
 
         z = z + step
         step = min(8.5, step + quality.depthGrowth)
     end
+
 end
 
 return RendererVS
