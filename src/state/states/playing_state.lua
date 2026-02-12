@@ -137,6 +137,9 @@ function PlayingState:_initialPerfTier()
 end
 
 function PlayingState:_initWorld(seed)
+    if self.chunkManager and self.chunkManager.shutdown then
+        self.chunkManager:shutdown()
+    end
     self.worldSeed = seed or self.worldSeed
     self.camera3d = Camera3D.new()
     self.camera3d:resize(love.graphics.getWidth(), love.graphics.getHeight())

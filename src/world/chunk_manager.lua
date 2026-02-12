@@ -2,6 +2,8 @@ local Constants = require("src.constants")
 local Chunk = require("src.world.chunk")
 local Coord = require("src.world.coordinate")
 local Pipeline = require("src.gen.pipeline")
+local ChunkCodec = require("src.gen.chunk_codec")
+local ThreadedGenerator = require("src.gen.threaded_generator")
 local ChunkStore = require("src.persistence.chunk_store")
 
 local floor = math.floor
@@ -33,6 +35,12 @@ function ChunkManager.new(worldSeed)
         generatedThisFrame = 0,
         evictedThisFrame = 0,
         queueSizeThisFrame = 0,
+        inFlightJobs = {},
+        inFlightCount = 0,
+        maxInFlightJobs = 3,
+        maxDispatchPerFrame = 3,
+        maxResultApplyPerFrame = 6,
+        threadGenerator = ThreadedGenerator.new(worldSeed or Constants.DEFAULT_SEED),
     }, ChunkManager)
     return self
 end
@@ -97,6 +105,7 @@ function ChunkManager:update(camWx, camWy, dt)
     self.frameCount = self.frameCount + 1
     self.generatedThisFrame = 0
     self.evictedThisFrame = 0
+    self:collectThreadResults()
 
     local camCx = floor(camWx / Constants.CHUNK_W)
     local camCy = floor(camWy / Constants.CHUNK_H)
@@ -113,7 +122,7 @@ function ChunkManager:update(camWx, camWy, dt)
 
     -- Evict distant chunks
     self:evictChunks(camCx, camCy)
-    self.queueSizeThisFrame = #self.loadQueue - self.loadQueueHead + 1
+    self.queueSizeThisFrame = (#self.loadQueue - self.loadQueueHead + 1) + self.inFlightCount
     if self.queueSizeThisFrame < 0 then
         self.queueSizeThisFrame = 0
     end
@@ -148,33 +157,61 @@ end
 function ChunkManager:processQueue()
     if self.loadQueueHead > #self.loadQueue then return end
 
-    local startTime = love.timer.getTime()
-    local budget = self.genBudgetMs
+    if self.threadGenerator then
+        local dispatched = 0
+        while self.loadQueueHead <= #self.loadQueue do
+            if dispatched >= self.maxDispatchPerFrame then break end
+            if self.inFlightCount >= self.maxInFlightJobs then break end
 
-    while self.loadQueueHead <= #self.loadQueue do
-        local entry = self.loadQueue[self.loadQueueHead]
-        local chunk = self:getOrCreateChunk(entry.cx, entry.cy)
+            local entry = self.loadQueue[self.loadQueueHead]
+            local chunk = self:getOrCreateChunk(entry.cx, entry.cy)
+            local key = chunkKey(entry.cx, entry.cy)
 
-        if not chunk.generated then
-            local remainingBudget = budget - (love.timer.getTime() - startTime) * 1000
-            if remainingBudget <= 0 then break end
-
-            local completed = Pipeline.generate(chunk, self.worldSeed, remainingBudget)
-            if completed then
-                if self.chunkStore then
-                    self.chunkStore:saveChunk(chunk)
-                end
-                self.generatedThisFrame = self.generatedThisFrame + 1
+            if chunk.generated then
+                self.loadQueueHead = self.loadQueueHead + 1
+            elseif self.inFlightJobs[key] then
                 self.loadQueueHead = self.loadQueueHead + 1
             else
-                break  -- budget exhausted mid-stage
+                local jobId = self.threadGenerator:submit(entry.cx, entry.cy, self.worldSeed)
+                if not jobId then
+                    break
+                end
+                self.inFlightJobs[key] = jobId
+                self.inFlightCount = self.inFlightCount + 1
+                chunk.generating = true
+                self.loadQueueHead = self.loadQueueHead + 1
+                dispatched = dispatched + 1
             end
-        else
-            self.loadQueueHead = self.loadQueueHead + 1
         end
+    else
+        local startTime = love.timer.getTime()
+        local budget = self.genBudgetMs
 
-        local elapsed = (love.timer.getTime() - startTime) * 1000
-        if elapsed >= budget then break end
+        while self.loadQueueHead <= #self.loadQueue do
+            local entry = self.loadQueue[self.loadQueueHead]
+            local chunk = self:getOrCreateChunk(entry.cx, entry.cy)
+
+            if not chunk.generated then
+                local remainingBudget = budget - (love.timer.getTime() - startTime) * 1000
+                if remainingBudget <= 0 then break end
+
+                local completed = Pipeline.generate(chunk, self.worldSeed, remainingBudget)
+                if completed then
+                    if self.chunkStore then
+                        self.chunkStore:saveChunk(chunk)
+                    end
+                    self.generatedThisFrame = self.generatedThisFrame + 1
+                    self.loadQueueHead = self.loadQueueHead + 1
+                else
+                    break  -- budget exhausted mid-stage
+                end
+            else
+                self.loadQueueHead = self.loadQueueHead + 1
+            end
+
+            local elapsed = (love.timer.getTime() - startTime) * 1000
+            if elapsed >= budget then break end
+        end
     end
 
     if self.loadQueueHead > #self.loadQueue then
@@ -223,6 +260,10 @@ function ChunkManager:evictChunks(camCx, camCy)
         local function evictByKey(key)
             -- Release GPU mesh before evicting to prevent memory leak
             local chunk = self.chunks[key]
+            if self.inFlightJobs[key] then
+                self.inFlightJobs[key] = nil
+                self.inFlightCount = max(0, self.inFlightCount - 1)
+            end
             if chunk and self.chunkStore and chunk.generated then
                 self.chunkStore:saveChunk(chunk)
             end
@@ -241,6 +282,40 @@ function ChunkManager:evictChunks(camCx, camCy)
         for i = 1, optionalCount do
             evictByKey(optionalEvict[i].key)
         end
+    end
+end
+
+function ChunkManager:collectThreadResults()
+    if not self.threadGenerator then
+        return
+    end
+    local results = self.threadGenerator:collect(self.maxResultApplyPerFrame)
+    for _, msg in ipairs(results) do
+        local key = chunkKey(msg.cx, msg.cy)
+        if self.inFlightJobs[key] then
+            self.inFlightJobs[key] = nil
+            self.inFlightCount = max(0, self.inFlightCount - 1)
+        end
+
+        local chunk = self.chunks[key]
+        if chunk and (not chunk.generated) and ChunkCodec.decodeIntoChunk(msg.payload, chunk) then
+            chunk.generated = true
+            chunk.genStage = Pipeline.getStageCount()
+            chunk.dirty = true
+            chunk._mesh3dDirty = true
+            chunk.generating = false
+            if self.chunkStore then
+                self.chunkStore:saveChunk(chunk)
+            end
+            self.generatedThisFrame = self.generatedThisFrame + 1
+        end
+    end
+end
+
+function ChunkManager:shutdown()
+    if self.threadGenerator then
+        self.threadGenerator:stop()
+        self.threadGenerator = nil
     end
 end
 
