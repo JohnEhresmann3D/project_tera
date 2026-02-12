@@ -14,6 +14,8 @@ local CH = Constants.CHUNK_H
 local ZL = Constants.Z_LEVELS
 local floor = math.floor
 local min   = math.min
+local max   = math.max
+local abs   = math.abs
 
 local Renderer3D = {}
 
@@ -145,6 +147,12 @@ end
 local dirtyList = {}
 local visibleList = {}
 local rebuildSet = {}
+local lastYaw = nil
+local lastPitch = nil
+
+local TURN_THROTTLE_THRESHOLD = 0.012
+local TURN_REBUILD_SCALE = 0.5
+local FIRST_BUILD_RADIUS_BONUS = 2
 
 function Renderer3D.draw(camera3d, chunkManager, player)
     -- Update camera matrices
@@ -189,11 +197,28 @@ function Renderer3D.draw(camera3d, chunkManager, player)
     local viewR     = chunkManager.loadRadius or Constants.LOAD_RADIUS
     local activeRSq = activeR * activeR
     local viewRSq   = viewR * viewR
+    local buildR = activeR + FIRST_BUILD_RADIUS_BONUS
+    local buildRSq = buildR * buildR
 
     local meshesDrawn = 0
     local meshesTotal = 0
     local meshRebuilds = 0
     local maxRebuilds = chunkManager.meshRebuildBudget or Constants.MAX_MESH_REBUILDS_PER_FRAME
+
+    local turningFast = false
+    if lastYaw then
+        local yawDelta = abs(camera3d.yaw - lastYaw)
+        if yawDelta > math.pi then
+            yawDelta = 2 * math.pi - yawDelta
+        end
+        local pitchDelta = abs(camera3d.pitch - lastPitch)
+        turningFast = (yawDelta + pitchDelta) > TURN_THROTTLE_THRESHOLD
+    end
+    lastYaw = camera3d.yaw
+    lastPitch = camera3d.pitch
+    if turningFast then
+        maxRebuilds = max(1, floor(maxRebuilds * TURN_REBUILD_SCALE))
+    end
 
     -- Create neighbor lookup once for all mesh rebuilds this frame
     local neighborFunc = createNeighborFunc(chunkManager)
@@ -246,7 +271,8 @@ function Renderer3D.draw(camera3d, chunkManager, player)
                         if chunk._mesh3dDirty then
                             local inActiveZone = distSq <= activeRSq
                             local needsFirstBuild = chunk._mesh3d == nil
-                            if inActiveZone or needsFirstBuild then
+                            local inBuildZone = distSq <= buildRSq
+                            if inActiveZone or (needsFirstBuild and inBuildZone) then
                                 dirtyCount = dirtyCount + 1
                                 local entry = dirtyList[dirtyCount]
                                 if not entry then
