@@ -52,6 +52,17 @@ local STRUCTURE_BUFFER = 8
 local flatBuf = {}
 local flatLen = 0
 
+-- Only emit a face if it borders air, or a different transparent block type.
+local function shouldEmitFace(blockId, neighborId)
+    if neighborId == BLOCK_AIR then
+        return true
+    end
+    if neighborId == blockId then
+        return false
+    end
+    return isTransparent(neighborId)
+end
+
 -- Emit 6 vertices (2 triangles) for one face into the flat buffer.
 local function emitFace(x0,y0,z0, x1,y1,z1, x2,y2,z2,
                         x3,y3,z3, x4,y4,z4, x5,y5,z5,
@@ -187,7 +198,7 @@ function MeshBuilder.build(chunk, getNeighborBlock)
                     end
 
                     -- TOP face (+Z world / +Y in 3D)
-                    if nTop == BLOCK_AIR or isTransparent(nTop) then
+                    if shouldEmitFace(blockId, nTop) then
                         local r = cr * BRIGHT_TOP
                         local g = cg * BRIGHT_TOP
                         local b = cb * BRIGHT_TOP
@@ -198,7 +209,7 @@ function MeshBuilder.build(chunk, getNeighborBlock)
                     end
 
                     -- BOTTOM face (-Z world / -Y in 3D)
-                    if nBot == BLOCK_AIR or isTransparent(nBot) then
+                    if shouldEmitFace(blockId, nBot) then
                         local r = cr * BRIGHT_BOTTOM
                         local g = cg * BRIGHT_BOTTOM
                         local b = cb * BRIGHT_BOTTOM
@@ -209,7 +220,7 @@ function MeshBuilder.build(chunk, getNeighborBlock)
                     end
 
                     -- EAST face (+X world / +X in 3D)
-                    if nEast == BLOCK_AIR or isTransparent(nEast) then
+                    if shouldEmitFace(blockId, nEast) then
                         local r = cr * BRIGHT_EAST
                         local g = cg * BRIGHT_EAST
                         local b = cb * BRIGHT_EAST
@@ -220,7 +231,7 @@ function MeshBuilder.build(chunk, getNeighborBlock)
                     end
 
                     -- WEST face (-X world / -X in 3D)
-                    if nWest == BLOCK_AIR or isTransparent(nWest) then
+                    if shouldEmitFace(blockId, nWest) then
                         local r = cr * BRIGHT_WEST
                         local g = cg * BRIGHT_WEST
                         local b = cb * BRIGHT_WEST
@@ -231,7 +242,7 @@ function MeshBuilder.build(chunk, getNeighborBlock)
                     end
 
                     -- SOUTH face (+Y world / +Z in 3D)
-                    if nSouth == BLOCK_AIR or isTransparent(nSouth) then
+                    if shouldEmitFace(blockId, nSouth) then
                         local r = cr * BRIGHT_SOUTH
                         local g = cg * BRIGHT_SOUTH
                         local b = cb * BRIGHT_SOUTH
@@ -242,7 +253,7 @@ function MeshBuilder.build(chunk, getNeighborBlock)
                     end
 
                     -- NORTH face (-Y world / -Z in 3D)
-                    if nNorth == BLOCK_AIR or isTransparent(nNorth) then
+                    if shouldEmitFace(blockId, nNorth) then
                         local r = cr * BRIGHT_NORTH
                         local g = cg * BRIGHT_NORTH
                         local b = cb * BRIGHT_NORTH
