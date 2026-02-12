@@ -115,6 +115,7 @@ function PlayingState.new(stateManager)
         fpsEma = 60,
         adaptiveTimer = 0,
         adaptiveCooldown = 0,
+        voxelPrevFlight = nil,
     }, PlayingState)
 end
 
@@ -201,9 +202,14 @@ function PlayingState:update(dt)
     -- 1) player movement/collision
     -- 2) chunk streaming around new player position
     -- 3) sky/time and adaptive performance
-    self.player:update(dt, self.camera3d, self.chunkManager)
-    local px, py = self.player:getWorldPos()
-    self.chunkManager:update(px, py, dt)
+    if self.renderMode == "voxelspace32" then
+        -- In VoxelSpace mode, movement must not collide against Mesh3D chunks.
+        self.player:update(dt, self.camera3d, nil)
+    else
+        self.player:update(dt, self.camera3d, self.chunkManager)
+        local px, py = self.player:getWorldPos()
+        self.chunkManager:update(px, py, dt)
+    end
     Sky.update(dt)
 
     -- Adaptive quality with hysteresis to avoid rapid tier oscillation.
@@ -288,8 +294,18 @@ function PlayingState:keypressed(key)
         -- Fast renderer A/B testing during gameplay.
         if self.renderMode == "mesh3d" then
             self.renderMode = "voxelspace32"
+            -- Preserve and then force flight so VoxelSpace is free-move.
+            self.voxelPrevFlight = self.player.flying
+            if not self.player.flying then
+                self.player:toggleFlight()
+            end
         else
             self.renderMode = "mesh3d"
+            -- Restore the player's prior flight mode on return.
+            if self.voxelPrevFlight == false and self.player.flying then
+                self.player:toggleFlight()
+            end
+            self.voxelPrevFlight = nil
         end
     elseif key == "r" then
         self:_initWorld(self.worldSeed + 1)

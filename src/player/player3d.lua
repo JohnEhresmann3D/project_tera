@@ -95,8 +95,25 @@ function Player3D:update(dt, camera3d, chunkManager)
     end
 
     if not chunkManager then
+        -- No collision world (VoxelSpace mode): free movement only.
         self.wx = self.wx + mx * moveSpeed * dt
         self.wy = self.wy + my * moveSpeed * dt
+        local dz = 0
+        if love.keyboard.isDown("space") then
+            dz = dz + moveSpeed * dt
+        end
+        -- Keep shift descend when flight is active; ctrl always descends.
+        if self.flying and (love.keyboard.isDown("lshift") or love.keyboard.isDown("rshift")) then
+            dz = dz - moveSpeed * dt
+        end
+        if love.keyboard.isDown("lctrl") or love.keyboard.isDown("rctrl") then
+            dz = dz - moveSpeed * dt
+        end
+        self.wz = self.wz + dz
+        if self.wz < 1 then self.wz = 1 end
+        if self.wz > ZL - 3 then self.wz = ZL - 3 end
+        self.vz = 0
+        self.onGround = false
         camera3d:setPosition(self.wx, self.wz + Constants.EYE_HEIGHT, self.wy)
         return
     end
