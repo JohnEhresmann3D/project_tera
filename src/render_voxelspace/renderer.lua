@@ -184,7 +184,7 @@ function RendererVS.draw(camera3d, player)
             if top < bot then
                 local fogMix = fog
                 if underwater then
-                    fogMix = min(1.0, fog + 0.22 + underT * 0.28)
+                    fogMix = min(1.0, fog + 0.10 + underT * 0.18)
                 end
                 if waterDepth > 0.25 then
                     local floorProjected = horizon - ((floorH8 - camHeight) * quality.projScale) / z
@@ -200,9 +200,9 @@ function RendererVS.draw(camera3d, player)
                     local wrFog = cr * (1 - fogMix) + skyR * fogMix
                     local wgFog = cg * (1 - fogMix) + skyG * fogMix
                     local wbFog = cb * (1 - fogMix) + skyB * fogMix
-                    local depthAlpha = min(0.82, 0.18 + (waterDepth / 22.0) * 0.52)
+                    local depthAlpha = min(0.68, 0.12 + (waterDepth / 26.0) * 0.42)
                     if underwater then
-                        depthAlpha = min(0.92, depthAlpha + 0.10 + underT * 0.08)
+                        depthAlpha = min(0.78, depthAlpha + 0.08 + underT * 0.06)
                     end
                     love.graphics.setColor(wrFog, wgFog, wbFog, depthAlpha)
                     love.graphics.rectangle("fill", sx - 1, top, quality.columnStep, bot - top)

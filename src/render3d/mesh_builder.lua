@@ -26,7 +26,7 @@ local MICRO_GAP = math.max(0, math.min(0.7, Constants.MICRO_VOXEL_GAP or 0.16))
 local MICRO_HEIGHT = math.max(0.08, math.min(0.48, Constants.MICRO_VOXEL_HEIGHT or 0.28))
 
 -- Localize hot functions / math
-local getColor       = BlockRegistry.getColor
+local getFaceColor   = BlockRegistry.getFaceColor
 local isTransparent  = BlockRegistry.isTransparent
 local isSolid        = BlockRegistry.isSolid
 local newMesh        = love.graphics.newMesh
@@ -95,7 +95,7 @@ local function isMicroSurfaceCandidate(blockId)
     return isSolid(blockId) and (not isTransparent(blockId))
 end
 
-local function emitMicroTop(wx, wy, wz, cr, cg, cb, ca, microSubdiv)
+local function emitMicroTop(wx, wy, wz, tr, tg, tb, sr, sg, sb, ca, microSubdiv)
     local subdiv = math.max(1, microSubdiv or MICRO_SUBDIV_DEFAULT)
     local cell = 1.0 / subdiv
     local pad = cell * MICRO_GAP * 0.5
@@ -114,33 +114,36 @@ local function emitMicroTop(wx, wy, wz, cr, cg, cb, ca, microSubdiv)
             if sx1 > sx0 and sz1 > sz0 then
                 local noise = hash01(wx, wy, wz, sx, sy)
                 local shade = 0.92 + noise * 0.16
-                local r = cr * shade
-                local g = cg * shade
-                local b = cb * shade
+                local trs = tr * shade
+                local tgs = tg * shade
+                local tbs = tb * shade
+                local srs = sr * shade
+                local sgs = sg * shade
+                local sbs = sb * shade
 
                 -- Top of tiny cube
                 emitFace(
                     sx0, yTop, sz0,   sx0, yTop, sz1,   sx1, yTop, sz1,
                     sx0, yTop, sz0,   sx1, yTop, sz1,   sx1, yTop, sz0,
-                    r * BRIGHT_TOP, g * BRIGHT_TOP, b * BRIGHT_TOP, ca)
+                    trs * BRIGHT_TOP, tgs * BRIGHT_TOP, tbs * BRIGHT_TOP, ca)
 
                 -- Four tiny side walls (intentional: gaps make these visible).
                 emitFace(
                     sx1, yBot, sz0,   sx1, yTop, sz0,   sx1, yTop, sz1,
                     sx1, yBot, sz0,   sx1, yTop, sz1,   sx1, yBot, sz1,
-                    r * BRIGHT_EAST, g * BRIGHT_EAST, b * BRIGHT_EAST, ca)
+                    srs * BRIGHT_EAST, sgs * BRIGHT_EAST, sbs * BRIGHT_EAST, ca)
                 emitFace(
                     sx0, yBot, sz1,   sx0, yTop, sz1,   sx0, yTop, sz0,
                     sx0, yBot, sz1,   sx0, yTop, sz0,   sx0, yBot, sz0,
-                    r * BRIGHT_WEST, g * BRIGHT_WEST, b * BRIGHT_WEST, ca)
+                    srs * BRIGHT_WEST, sgs * BRIGHT_WEST, sbs * BRIGHT_WEST, ca)
                 emitFace(
                     sx0, yBot, sz1,   sx1, yBot, sz1,   sx1, yTop, sz1,
                     sx0, yBot, sz1,   sx1, yTop, sz1,   sx0, yTop, sz1,
-                    r * BRIGHT_SOUTH, g * BRIGHT_SOUTH, b * BRIGHT_SOUTH, ca)
+                    srs * BRIGHT_SOUTH, sgs * BRIGHT_SOUTH, sbs * BRIGHT_SOUTH, ca)
                 emitFace(
                     sx1, yBot, sz0,   sx0, yBot, sz0,   sx0, yTop, sz0,
                     sx1, yBot, sz0,   sx0, yTop, sz0,   sx1, yTop, sz0,
-                    r * BRIGHT_NORTH, g * BRIGHT_NORTH, b * BRIGHT_NORTH, ca)
+                    srs * BRIGHT_NORTH, sgs * BRIGHT_NORTH, sbs * BRIGHT_NORTH, ca)
             end
         end
     end
@@ -409,11 +412,19 @@ function MeshBuilder.build(chunk, getNeighborBlock, opts)
                 local idx = lx + yRow + lz * CW_CH + 1
                 local blockId = blocks[idx]
                 if blockId ~= BLOCK_AIR then
-                    local color = getColor(blockId)
-                    local cr = color[1]
-                    local cg = color[2]
-                    local cb = color[3]
-                    local ca = color[4]
+                    local topColor = getFaceColor(blockId, "top")
+                    local sideColor = getFaceColor(blockId, "side")
+                    local bottomColor = getFaceColor(blockId, "bottom")
+                    local tr = topColor[1]
+                    local tg = topColor[2]
+                    local tb = topColor[3]
+                    local sr = sideColor[1]
+                    local sg = sideColor[2]
+                    local sb = sideColor[3]
+                    local br = bottomColor[1]
+                    local bg = bottomColor[2]
+                    local bb = bottomColor[3]
+                    local ca = topColor[4]
 
                     local wx = originX + lx
                     local wy = originY + ly
@@ -454,11 +465,11 @@ function MeshBuilder.build(chunk, getNeighborBlock, opts)
                     -- TOP face (+Z world / +Y in 3D)
                     if shouldEmitFace(blockId, nTop) then
                         if useMicroBlock then
-                            emitMicroTop(wx, wy, wz, cr, cg, cb, ca, microSubdiv)
+                            emitMicroTop(wx, wy, wz, tr, tg, tb, sr, sg, sb, ca, microSubdiv)
                         else
-                            local r = cr * BRIGHT_TOP
-                            local g = cg * BRIGHT_TOP
-                            local b = cb * BRIGHT_TOP
+                            local r = tr * BRIGHT_TOP
+                            local g = tg * BRIGHT_TOP
+                            local b = tb * BRIGHT_TOP
                             emitFace(
                                 x0, y1, z0,   x0, y1, z1,   x1, y1, z1,
                                 x0, y1, z0,   x1, y1, z1,   x1, y1, z0,
@@ -468,9 +479,9 @@ function MeshBuilder.build(chunk, getNeighborBlock, opts)
 
                     -- BOTTOM face (-Z world / -Y in 3D)
                     if shouldEmitFace(blockId, nBot) then
-                        local r = cr * BRIGHT_BOTTOM
-                        local g = cg * BRIGHT_BOTTOM
-                        local b = cb * BRIGHT_BOTTOM
+                        local r = br * BRIGHT_BOTTOM
+                        local g = bg * BRIGHT_BOTTOM
+                        local b = bb * BRIGHT_BOTTOM
                         emitFace(
                             x0, y0, z0,   x1, y0, z0,   x1, y0, z1,
                             x0, y0, z0,   x1, y0, z1,   x0, y0, z1,
@@ -480,11 +491,11 @@ function MeshBuilder.build(chunk, getNeighborBlock, opts)
                     -- EAST face (+X world / +X in 3D)
                     if shouldEmitFace(blockId, nEast) then
                         if useMicroBlock then
-                            emitMicroEast(x1, y0, y1, z0, z1, cr, cg, cb, ca, microSubdiv)
+                            emitMicroEast(x1, y0, y1, z0, z1, sr, sg, sb, ca, microSubdiv)
                         else
-                            local r = cr * BRIGHT_EAST
-                            local g = cg * BRIGHT_EAST
-                            local b = cb * BRIGHT_EAST
+                            local r = sr * BRIGHT_EAST
+                            local g = sg * BRIGHT_EAST
+                            local b = sb * BRIGHT_EAST
                             emitFace(
                                 x1, y0, z0,   x1, y1, z0,   x1, y1, z1,
                                 x1, y0, z0,   x1, y1, z1,   x1, y0, z1,
@@ -495,11 +506,11 @@ function MeshBuilder.build(chunk, getNeighborBlock, opts)
                     -- WEST face (-X world / -X in 3D)
                     if shouldEmitFace(blockId, nWest) then
                         if useMicroBlock then
-                            emitMicroWest(x0, y0, y1, z0, z1, cr, cg, cb, ca, microSubdiv)
+                            emitMicroWest(x0, y0, y1, z0, z1, sr, sg, sb, ca, microSubdiv)
                         else
-                            local r = cr * BRIGHT_WEST
-                            local g = cg * BRIGHT_WEST
-                            local b = cb * BRIGHT_WEST
+                            local r = sr * BRIGHT_WEST
+                            local g = sg * BRIGHT_WEST
+                            local b = sb * BRIGHT_WEST
                             emitFace(
                                 x0, y0, z1,   x0, y1, z1,   x0, y1, z0,
                                 x0, y0, z1,   x0, y1, z0,   x0, y0, z0,
@@ -510,11 +521,11 @@ function MeshBuilder.build(chunk, getNeighborBlock, opts)
                     -- SOUTH face (+Y world / +Z in 3D)
                     if shouldEmitFace(blockId, nSouth) then
                         if useMicroBlock then
-                            emitMicroSouth(x0, x1, y0, y1, z1, cr, cg, cb, ca, microSubdiv)
+                            emitMicroSouth(x0, x1, y0, y1, z1, sr, sg, sb, ca, microSubdiv)
                         else
-                            local r = cr * BRIGHT_SOUTH
-                            local g = cg * BRIGHT_SOUTH
-                            local b = cb * BRIGHT_SOUTH
+                            local r = sr * BRIGHT_SOUTH
+                            local g = sg * BRIGHT_SOUTH
+                            local b = sb * BRIGHT_SOUTH
                             emitFace(
                                 x0, y0, z1,   x1, y0, z1,   x1, y1, z1,
                                 x0, y0, z1,   x1, y1, z1,   x0, y1, z1,
@@ -525,11 +536,11 @@ function MeshBuilder.build(chunk, getNeighborBlock, opts)
                     -- NORTH face (-Y world / -Z in 3D)
                     if shouldEmitFace(blockId, nNorth) then
                         if useMicroBlock then
-                            emitMicroNorth(x0, x1, y0, y1, z0, cr, cg, cb, ca, microSubdiv)
+                            emitMicroNorth(x0, x1, y0, y1, z0, sr, sg, sb, ca, microSubdiv)
                         else
-                            local r = cr * BRIGHT_NORTH
-                            local g = cg * BRIGHT_NORTH
-                            local b = cb * BRIGHT_NORTH
+                            local r = sr * BRIGHT_NORTH
+                            local g = sg * BRIGHT_NORTH
+                            local b = sb * BRIGHT_NORTH
                             emitFace(
                                 x1, y0, z0,   x0, y0, z0,   x0, y1, z0,
                                 x1, y0, z0,   x0, y1, z0,   x1, y1, z0,

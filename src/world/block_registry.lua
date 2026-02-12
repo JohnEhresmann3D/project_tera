@@ -35,6 +35,46 @@ local blocks = {
     [C.BLOCK_CAVE_ENTRANCE]= { name = "cave_entrance", solid = false, transparent = false, color = {0.08, 0.05, 0.05, 1} },
 }
 
+local faceColors = {}
+
+local function shade(color, mul)
+    return { color[1] * mul, color[2] * mul, color[3] * mul, color[4] }
+end
+
+local function buildFaceColors()
+    for id, b in pairs(blocks) do
+        local base = b.color
+        faceColors[id] = {
+            top = base,
+            side = shade(base, 0.88),
+            bottom = shade(base, 0.72),
+        }
+    end
+
+    -- Classic voxel grass treatment: grassy top, dirt sides/bottom.
+    faceColors[C.BLOCK_GRASS] = {
+        top = blocks[C.BLOCK_GRASS].color,
+        side = blocks[C.BLOCK_DIRT].color,
+        bottom = shade(blocks[C.BLOCK_DIRT].color, 0.78),
+    }
+
+    -- Frozen grass keeps icy top but uses earthier sides.
+    faceColors[C.BLOCK_FROZEN_GRASS] = {
+        top = blocks[C.BLOCK_FROZEN_GRASS].color,
+        side = shade(blocks[C.BLOCK_PERMAFROST].color, 0.94),
+        bottom = shade(blocks[C.BLOCK_PERMAFROST].color, 0.78),
+    }
+
+    -- Water reads better with brighter surface and darker side walls.
+    faceColors[C.BLOCK_WATER] = {
+        top = shade(blocks[C.BLOCK_WATER].color, 1.08),
+        side = shade(blocks[C.BLOCK_WATER].color, 0.78),
+        bottom = shade(blocks[C.BLOCK_WATER].color, 0.62),
+    }
+end
+
+buildFaceColors()
+
 function BlockRegistry.get(id)
     return blocks[id] or blocks[C.BLOCK_AIR]
 end
@@ -53,6 +93,11 @@ function BlockRegistry.getColor(id)
     local b = blocks[id]
     if b then return b.color end
     return {1, 0, 1, 1}  -- magenta for unknown
+end
+
+function BlockRegistry.getFaceColor(id, face)
+    local fc = faceColors[id] or faceColors[C.BLOCK_AIR]
+    return (fc and fc[face]) or (fc and fc.side) or {1, 0, 1, 1}
 end
 
 return BlockRegistry
