@@ -23,6 +23,8 @@ local stagesRegistered = false
 local PlayingState = {}
 PlayingState.__index = PlayingState
 
+-- Core runtime state.
+-- Owns: player/camera, chunk streaming, render mode, and perf adaptation.
 -- Tier table drives both simulation workload (chunk/gen budgets)
 -- and renderer quality knobs. Lower tiers are mobile-safe defaults.
 local PERF_TIERS = {
@@ -195,6 +197,10 @@ function PlayingState:onEnter(_, payload)
 end
 
 function PlayingState:update(dt)
+    -- Update order matters:
+    -- 1) player movement/collision
+    -- 2) chunk streaming around new player position
+    -- 3) sky/time and adaptive performance
     self.player:update(dt, self.camera3d, self.chunkManager)
     local px, py = self.player:getWorldPos()
     self.chunkManager:update(px, py, dt)

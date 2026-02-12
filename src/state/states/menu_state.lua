@@ -5,6 +5,13 @@ local bit = require("bit")
 local bxor = bit.bxor
 local band = bit.band
 
+-- Main menu state:
+-- seed entry/parsing, recent seed history, and transition into gameplay.
+--
+-- Flow:
+-- onEnter -> load history + prep UI
+-- draw    -> render panel + widgets
+-- Play    -> parse seed -> switch to PLAYING with payload
 local MenuState = {}
 MenuState.__index = MenuState
 
@@ -16,6 +23,7 @@ local function trim(s)
 end
 
 local function parseSeed(text)
+    -- Accept numeric seeds directly, or hash arbitrary text to a stable int.
     local t = trim(text or "")
     if t == "" then
         return 42
@@ -77,6 +85,7 @@ function MenuState.new(stateManager)
 end
 
 function MenuState:onEnter()
+    -- Menu owns mouse cursor, gameplay owns relative mouse capture.
     Input3D.setCapture(false)
     love.mouse.setVisible(true)
     self.seedHistory = loadSeedHistory()
@@ -88,6 +97,7 @@ function MenuState:onEnter()
 end
 
 function MenuState:_rememberSeed(seedText)
+    -- Keep most-recent unique seeds at the top.
     local normalized = trim(seedText)
     if normalized == "" then
         normalized = tostring(self.resolvedSeed)
@@ -108,6 +118,8 @@ function MenuState:_rememberSeed(seedText)
 end
 
 function MenuState:_startGame()
+    -- This is the single transition point from menu -> gameplay.
+    -- Keeping it centralized avoids inconsistent payloads.
     self.seedInput = self.ui:getText("seed_input")
     self.resolvedSeed = parseSeed(self.seedInput)
     self:_rememberSeed(self.seedInput)

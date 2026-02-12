@@ -1,6 +1,9 @@
 local GameState = require("src.state.game_state")
 local Input3D = require("src.player.input3d")
 
+-- Lightweight pause overlay state.
+-- Stores enough context to resume the previous state with same seed payload.
+-- No simulation updates happen here; it is purely input + overlay UI.
 local PausedState = {}
 PausedState.__index = PausedState
 
@@ -15,6 +18,7 @@ end
 function PausedState:onEnter(_, payload)
     self.previous = (payload and payload.previous) or GameState.PLAYING
     self.seed = payload and payload.seed or self.seed
+    -- Return cursor to OS while paused.
     Input3D.setCapture(false)
     love.mouse.setVisible(true)
 end

@@ -3,6 +3,13 @@
 
 local StructureCatalog = {}
 
+-- Placement metadata consumed by stage_structures.
+-- rarity is per-cell probability after deterministic hashing within gridSize.
+--
+-- For learners:
+-- - `gridSize` controls how often a structure *can* be considered.
+-- - `rarity` controls chance *within* those candidate cells.
+-- - `biomes` is a hard allowlist gate.
 StructureCatalog.structures = {
     {
         name = "cabin",

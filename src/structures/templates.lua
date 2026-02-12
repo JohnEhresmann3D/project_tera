@@ -5,9 +5,11 @@ local C = require("src.constants")
 
 local Templates = {}
 
--- Templates are defined as sparse block lists relative to anchor
--- Each entry: { dx, dy, dz, blockId }
--- dx, dy are offsets from anchor center, dz is offset from surface
+-- Template params are intentionally compact:
+-- stage_structures chooses placement and then interprets these fields
+-- to stamp different structure types.
+--
+-- Think of this as "what to build"; stage_structures is "where and when".
 
 Templates.cabin = {
     -- Floor (dz=0)
@@ -35,6 +37,7 @@ Templates.watchtower = {
 
 Templates.cave_entrance = {
     material = C.BLOCK_STONE,
+    -- Special marker used by gameplay/visual systems to identify cave entry.
     entranceBlock = C.BLOCK_CAVE_ENTRANCE,
 }
 

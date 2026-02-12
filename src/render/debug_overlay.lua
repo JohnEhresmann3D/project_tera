@@ -4,6 +4,11 @@ local BiomeCatalog = require("src.biomes.catalog")
 local Profiler = require("src.debug.profiler")
 local TerrainFields = require("src.gen.terrain_fields")
 
+-- Runtime debug overlays:
+-- chunk bounds, generation fields, perf stats, and noise-map preview.
+--
+-- Teaching intent: these views answer "why does terrain look/perf behave this way?"
+-- without requiring stepping through code in a debugger.
 local CW = Constants.CHUNK_W
 local CH = Constants.CHUNK_H
 local TW = Constants.TILE_W
@@ -66,6 +71,7 @@ local noisePreview = {
 }
 
 local function rebuildNoisePreview(centerX, centerY, seed)
+    -- Rebuild a small field diagnostic texture around player location.
     local size = noisePreview.size
     local half = floor(size * 0.5)
     local step = noisePreview.sampleStep
@@ -121,6 +127,7 @@ end
 function DebugOverlay.draw(camera, chunkManager, player)
     local mode = DebugOverlay.activeMode
 
+    -- Keep mode handling explicit to avoid unexpected overlay combinations.
     if mode == DebugOverlay.modes.chunks then
         if not DebugOverlay.mode3d then
             DebugOverlay.drawChunkGrid(camera, chunkManager)
@@ -146,6 +153,7 @@ function DebugOverlay.drawNoisePreview(chunkManager, player)
 
     local seed = chunkManager and chunkManager.worldSeed or Constants.DEFAULT_SEED
     local now = love.timer.getTime()
+    -- Rebuild preview only when useful (movement/seed/time) to keep this cheap.
     local movedFar = abs(px - noisePreview.centerX) > 6 or abs(py - noisePreview.centerY) > 6
     local stale = (now - noisePreview.lastUpdate) > 0.25
     local seedChanged = seed ~= noisePreview.seed

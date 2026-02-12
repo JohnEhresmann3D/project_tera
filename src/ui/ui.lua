@@ -1,3 +1,10 @@
+-- Tiny immediate-mode style UI helper used by menu/pause flows.
+--
+-- Mental model for learners:
+-- 1) State calls `beginFrame()`.
+-- 2) State draws widgets (`button`, `textInput`, ...).
+-- 3) Widgets read mouse/keyboard state captured earlier this frame.
+-- 4) State calls `endFrame()` to clear one-frame press flags.
 local UI = {}
 UI.__index = UI
 local utf8 = require("utf8")
@@ -20,6 +27,7 @@ function UI.new()
 end
 
 function UI:beginFrame()
+    -- Reset per-frame interaction state before drawing widgets.
     self.hotId = nil
     self.clickedId = nil
 end
@@ -43,6 +51,7 @@ function UI:mousepressed(x, y, button)
 end
 
 function UI:keypressed(key)
+    -- UTF-8 safe backspace for focused text field.
     if key == "backspace" and self.focusedInputId then
         local entry = self.textInputs[self.focusedInputId]
         if entry then
@@ -80,6 +89,7 @@ function UI:panel(x, y, w, h, title)
 end
 
 function UI:button(id, label, x, y, w, h)
+    -- "clicked" is emitted once on press while hovered.
     local hovered = pointInRect(self.mouseX, self.mouseY, x, y, w, h)
     if hovered then
         self.hotId = id
@@ -120,12 +130,14 @@ function UI:textInput(id, x, y, w, h, value, opts)
     end
 
     local hovered = pointInRect(self.mouseX, self.mouseY, x, y, w, h)
+    -- Click to focus; click elsewhere to blur.
     if self.pressed and hovered then
         self.focusedInputId = id
     elseif self.pressed and not hovered and self.focusedInputId == id then
         self.focusedInputId = nil
     end
 
+    -- Render "focused" style if this field currently owns keyboard input.
     if self.focusedInputId == id then
         love.graphics.setColor(0.12, 0.14, 0.18, 1)
         love.graphics.rectangle("fill", x, y, w, h, 6, 6)

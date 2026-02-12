@@ -1,6 +1,13 @@
 -- Main 3D rendering pipeline
 -- Two-tier rendering: active radius for expensive mesh rebuilds,
 -- full load radius for cheap cached mesh drawing.
+--
+-- Frame flow (high level):
+-- 1) Update camera matrices + frustum planes.
+-- 2) Gather visible chunks.
+-- 3) Rebuild only a budgeted subset of dirty meshes (near player first).
+-- 4) Draw cached meshes + rebuilt meshes.
+-- 5) Blit internal render canvas to the window.
 
 local Constants    = require("src.constants")
 local Shader       = require("src.render3d.shader")
@@ -223,7 +230,8 @@ function Renderer3D.draw(camera3d, chunkManager, player)
     -- Create neighbor lookup once for all mesh rebuilds this frame
     local neighborFunc = createNeighborFunc(chunkManager)
 
-    -- Collect dirty chunks for prioritized rebuilds
+    -- Collect dirty chunks for prioritized rebuilds.
+    -- Learner note: this decouples "visibility" from "rebuild eligibility".
     local dirtyCount = 0
     local visibleCount = 0
 
@@ -303,7 +311,8 @@ function Renderer3D.draw(camera3d, chunkManager, player)
         end
     end
 
-    -- Rebuild closest dirty chunks within budget
+    -- Rebuild closest dirty chunks within budget.
+    -- This is the key frame-time guardrail for CPU-side meshing.
     local rebuildsThisFrame = min(dirtyCount, maxRebuilds)
     for i = 1, rebuildsThisFrame do
         rebuildSet[dirtyList[i].chunk] = true

@@ -1,3 +1,5 @@
+-- Simple accumulation profiler for debug HUD.
+-- record() can be called from hot paths; draw() summarizes averages/max.
 local Profiler = {}
 Profiler.timings = {}
 
