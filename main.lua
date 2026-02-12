@@ -1,3 +1,6 @@
+-- App entrypoint:
+-- Wires LOVE callbacks into a lightweight state machine.
+-- All gameplay/render logic lives inside registered states.
 local GameState = require("src.state.game_state")
 local StateManager = require("src.state.state_manager")
 local MenuState = require("src.ui.main_menu")
@@ -7,6 +10,7 @@ local PausedState = require("src.state.states.paused_state")
 local stateManager
 
 function love.load()
+    -- Single state manager instance for the whole app lifetime.
     stateManager = StateManager.new()
     stateManager:register(GameState.MENU, MenuState.new(stateManager))
     stateManager:register(GameState.PLAYING, PlayingState.new(stateManager))

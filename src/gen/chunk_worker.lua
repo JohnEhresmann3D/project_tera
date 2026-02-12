@@ -1,5 +1,7 @@
 local requestChannelName, resultChannelName = ...
 
+-- Worker thread entrypoint.
+-- Receives generation jobs and returns encoded chunk payloads.
 require("love.math")
 
 local Pipeline = require("src.gen.pipeline")
@@ -31,6 +33,7 @@ end
 registerStagesOnce()
 
 while true do
+    -- demand() blocks worker without burning CPU while idle.
     local msg = requestChannel:demand()
     if type(msg) == "table" then
         if msg.cmd == "stop" then

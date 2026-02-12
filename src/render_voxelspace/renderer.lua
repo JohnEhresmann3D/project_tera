@@ -2,6 +2,8 @@ local Constants = require("src.constants")
 local Sky = require("src.render3d.sky")
 local Map32 = require("src.render_voxelspace.map32")
 
+-- VoxelSpace32-style terrain renderer:
+-- raymarches depth layers and paints vertical spans per screen column.
 local max = math.max
 local min = math.min
 local sqrt = math.sqrt
@@ -23,6 +25,7 @@ local quality = {
 }
 
 local function ensureYBuffer()
+    -- Per-column "highest already drawn pixel" for hidden-surface removal.
     for x = 1, screenW do
         yBuffer[x] = screenH
     end
@@ -64,6 +67,7 @@ function RendererVS.draw(camera3d, player)
     local horizon = screenH * 0.52 + pitch * 230
     local camHeight = player.wz * 4.0 + 32
 
+    -- Build left/right edge rays from camera basis + horizontal FOV.
     local fx, fy = camera3d:getForwardFlat()
     local rx, ry = camera3d:getRight()
     local halfSpan = tan(quality.fov * 0.5)
@@ -82,6 +86,7 @@ function RendererVS.draw(camera3d, player)
         rxDirX, rxDirY = rxDirX / rLen, rxDirY / rLen
     end
 
+    -- March from near to far. Step grows with depth for performance.
     local z = 1.0
     local step = quality.depthStep
     local viewFar = quality.depthFar
@@ -112,6 +117,7 @@ function RendererVS.draw(camera3d, player)
                 love.graphics.setColor(r, g, b, 1)
                 love.graphics.rectangle("fill", sx - 1, top, quality.columnStep, bot - top)
                 local lastX = min(screenW, sx + quality.columnStep - 1)
+                -- Fill all covered columns so stepped rendering still occludes correctly.
                 for xi = sx, lastX do
                     yBuffer[xi] = top
                 end

@@ -1,3 +1,5 @@
+-- Minimal finite-state router.
+-- States are plain tables with optional lifecycle/input methods.
 local StateManager = {}
 StateManager.__index = StateManager
 
@@ -23,6 +25,7 @@ function StateManager:switch(name, payload)
     local nextState = self.states[name]
     assert(nextState, "Unknown state: " .. tostring(name))
 
+    -- Exit current state before entering next to keep transitions deterministic.
     local prevName = self.currentName
     local prevState = self.currentState
     callIfExists(prevState, "onExit", name, payload)

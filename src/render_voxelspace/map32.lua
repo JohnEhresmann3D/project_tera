@@ -2,6 +2,8 @@ local Constants = require("src.constants")
 local TerrainFields = require("src.gen.terrain_fields")
 local Noise = require("src.util.noise")
 
+-- Prebaked height/color atlas for VoxelSpace32 renderer.
+-- Stores one compact terrain representation and samples it with wrap + bilinear filtering.
 local floor = math.floor
 local max = math.max
 local min = math.min
@@ -62,6 +64,8 @@ function Map32.new(seed, size, spacing)
             local wx = x * self.spacing
             local wy = y * self.spacing
             local _, m, t = TerrainFields.sample(self.seed, wx, wy)
+            -- VoxelSpace visually benefits from smoothed elevation;
+            -- raw terrain noise can look too jagged at distance.
             local eSmooth = sampleSmoothedElevation(self.seed, wx, wy, self.spacing * 3)
             local surf = TerrainFields.surfaceZFromElevation(eSmooth)
             self.heights[i] = floor(surf * hScale + 0.5)
@@ -95,9 +99,8 @@ function Map32.new(seed, size, spacing)
                 g = g + (m - 0.5) * 0.08
                 b = b - (t - 0.5) * 0.04
 
-                -- VoxelSpace has only one sampled height/color per cell, so trees are
-                -- represented as deterministic canopy/height impostors.
-                -- Keep slight forest tint in ground tone, but trees are now separate billboards.
+                -- Keep slight forest tint in terrain color so vegetated zones read
+                -- even in terrain-only VoxelSpace mode.
                 if surf > water + 1 and landH < 0.72 and m > 0.40 then
                     local patchN = Noise.fbm2D(wx * 0.010 + 900, wy * 0.010 + 900, self.seed + 27000, 2, 0.5)
                     local localN = Noise.fbm2D(wx * 0.060 + 2100, wy * 0.060 + 2100, self.seed + 28000, 2, 0.5)
@@ -123,6 +126,7 @@ function Map32.new(seed, size, spacing)
 end
 
 function Map32:sample(wx, wy)
+    -- Continuous sample from discrete map via bilinear interpolation.
     local gx = wx / self.spacing
     local gy = wy / self.spacing
 

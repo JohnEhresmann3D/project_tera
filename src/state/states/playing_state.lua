@@ -23,6 +23,8 @@ local stagesRegistered = false
 local PlayingState = {}
 PlayingState.__index = PlayingState
 
+-- Tier table drives both simulation workload (chunk/gen budgets)
+-- and renderer quality knobs. Lower tiers are mobile-safe defaults.
 local PERF_TIERS = {
     { name = "ultra",  loadRadius = 12, activeRadius = 6, genBudgetMs = 6.0, meshRebuilds = 10, maxCached = 900, renderScale = 1.00 },
     { name = "high",   loadRadius = 10, activeRadius = 4, genBudgetMs = 4.5, meshRebuilds = 7,  maxCached = 650, renderScale = 1.00 },
@@ -40,6 +42,8 @@ local function ensureChunkGenerated(chunkManager, seed, cx, cy)
 end
 
 local function pickSafeSpawn(chunkManager, seed)
+    -- Scan nearby generated chunks for a walkable spawn:
+    -- solid ground and two air blocks for player headroom.
     local bestLand = nil
     local bestAny = nil
     local bestLandScore = -math.huge
@@ -87,6 +91,7 @@ local function registerStagesOnce()
     if stagesRegistered then
         return
     end
+    -- Stage order is intentional; later stages assume prior data exists.
     Pipeline.registerStage(StageTerrain)
     Pipeline.registerStage(StageCaves)
     Pipeline.registerStage(StageResources)
@@ -129,6 +134,7 @@ function PlayingState:_applyPerfTier(tierIndex)
 
     Renderer3D.setRenderScale(tier.renderScale)
 
+    -- VoxelSpace has its own quality model (column/depth stepping).
     local voxelQuality = {
         ultra =  { columnStep = 1, depthFar = 900, depthStep = 1.0, depthGrowth = 0.016, projScale = 390 },
         high =   { columnStep = 1, depthFar = 760, depthStep = 1.1, depthGrowth = 0.018, projScale = 370 },
@@ -165,6 +171,8 @@ function PlayingState:_initWorld(seed)
     Input3D.init(self.camera3d)
     DebugOverlay.mode3d = true
 
+    -- Pick a deterministic safe spawn near origin, then force one manager
+    -- update so surrounding chunks are queued immediately.
     local spawn = pickSafeSpawn(self.chunkManager, self.worldSeed)
     self.player.wx = spawn.wx
     self.player.wy = spawn.wy
@@ -192,7 +200,7 @@ function PlayingState:update(dt)
     self.chunkManager:update(px, py, dt)
     Sky.update(dt)
 
-    -- Adaptive quality with hysteresis.
+    -- Adaptive quality with hysteresis to avoid rapid tier oscillation.
     local fps = love.timer.getFPS()
     self.fpsEma = self.fpsEma * 0.9 + fps * 0.1
     self.adaptiveTimer = self.adaptiveTimer + dt
@@ -210,6 +218,7 @@ function PlayingState:update(dt)
 end
 
 function PlayingState:draw()
+    -- Render path is hot-swappable at runtime; HUD/debug stay shared.
     if self.renderMode == "voxelspace32" then
         RendererVS.draw(self.camera3d, self.player)
     else
@@ -270,6 +279,7 @@ function PlayingState:keypressed(key)
         if nextTier > #PERF_TIERS then nextTier = 1 end
         self:_applyPerfTier(nextTier)
     elseif key == "f10" then
+        -- Fast renderer A/B testing during gameplay.
         if self.renderMode == "mesh3d" then
             self.renderMode = "voxelspace32"
         else

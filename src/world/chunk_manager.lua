@@ -15,6 +15,8 @@ local ChunkManager = {}
 ChunkManager.__index = ChunkManager
 
 function ChunkManager.new(worldSeed)
+    -- Owns chunk lifecycle:
+    -- create/load -> queue generation -> apply results -> evict/persist.
     local self = setmetatable({
         chunks = {},
         loadQueue = {},
@@ -65,6 +67,7 @@ function ChunkManager:getOrCreateChunk(cx, cy)
     if not chunk then
         chunk = Chunk.new(cx, cy)
         if self.chunkStore then
+            -- If persisted chunk exists, this marks it generated immediately.
             self.chunkStore:loadChunk(cx, cy, chunk)
         end
         self.chunks[key] = chunk
@@ -105,6 +108,7 @@ function ChunkManager:update(camWx, camWy, dt)
     self.frameCount = self.frameCount + 1
     self.generatedThisFrame = 0
     self.evictedThisFrame = 0
+    -- Always apply async results first so new chunks are drawable this frame.
     self:collectThreadResults()
 
     local camCx = floor(camWx / Constants.CHUNK_W)
@@ -117,7 +121,7 @@ function ChunkManager:update(camWx, camWy, dt)
         self:rebuildLoadQueue(camCx, camCy)
     end
 
-    -- Process generation queue within budget
+    -- Process generation queue under CPU and in-flight limits.
     self:processQueue()
 
     -- Evict distant chunks
@@ -133,7 +137,7 @@ function ChunkManager:rebuildLoadQueue(camCx, camCy)
     self.loadQueueHead = 1
     local r = self.loadRadius
 
-    -- Spiral outward from camera for prioritized loading
+    -- Build a distance-sorted target set centered on current camera chunk.
     for dy = -r, r do
         for dx = -r, r do
             local cx = camCx + dx
@@ -170,6 +174,7 @@ function ChunkManager:processQueue()
             if chunk.generated then
                 self.loadQueueHead = self.loadQueueHead + 1
             elseif self.inFlightJobs[key] then
+                -- Already queued to worker, just advance.
                 self.loadQueueHead = self.loadQueueHead + 1
             else
                 local jobId = self.threadGenerator:submit(entry.cx, entry.cy, self.worldSeed)
@@ -184,6 +189,7 @@ function ChunkManager:processQueue()
             end
         end
     else
+        -- Single-thread fallback for targets without worker support.
         local startTime = love.timer.getTime()
         local budget = self.genBudgetMs
 
@@ -234,6 +240,7 @@ function ChunkManager:evictChunks(camCx, camCy)
     local hardRSq = hardR * hardR
     local staleThreshold = self.frameCount - self.cacheStaleFrames
 
+    -- Forced evictions keep memory bounded even if cap is not exceeded.
     local forcedEvict = {}
     local optionalEvict = {}
     for key, chunk in pairs(self.chunks) do
@@ -298,6 +305,7 @@ function ChunkManager:collectThreadResults()
         end
 
         local chunk = self.chunks[key]
+        -- Decode directly into resident chunk; stale results are ignored.
         if chunk and (not chunk.generated) and ChunkCodec.decodeIntoChunk(msg.payload, chunk) then
             chunk.generated = true
             chunk.genStage = Pipeline.getStageCount()

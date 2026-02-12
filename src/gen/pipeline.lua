@@ -1,6 +1,9 @@
 local Constants = require("src.constants")
 local Hash = require("src.util.hash")
 
+-- Worldgen pipeline orchestrator.
+-- Each stage mutates chunk data in-place; stage index enables resumable
+-- generation when running under a per-frame time budget.
 local Pipeline = {}
 
 -- Stages are registered in order
@@ -13,12 +16,14 @@ end
 -- Generate a chunk through all (or remaining) stages
 -- Returns true if generation completed, false if interrupted by budget
 function Pipeline.generate(chunk, worldSeed, budgetMs)
+    -- Context object is the per-chunk "blackboard" shared by all stages.
     local ctx = {
         seed = worldSeed,
         cx = chunk.cx,
         cy = chunk.cy,
         chunk = chunk,
-        -- Shared field caches (written by terrain stage, read by later stages)
+        -- Shared field caches (written by terrain stage, read by later stages).
+        -- Stored on chunk between frames if generation is budget-interrupted.
         elevation = chunk._elevation or {},
         moisture = chunk._moisture or {},
         temperature = chunk._temperature or {},
@@ -34,7 +39,7 @@ function Pipeline.generate(chunk, worldSeed, budgetMs)
         stage.run(ctx)
         chunk.genStage = i
 
-        -- Cache field data on the chunk for later stages across frames
+        -- Persist fields so continuation next frame sees identical inputs.
         chunk._elevation = ctx.elevation
         chunk._moisture = ctx.moisture
         chunk._temperature = ctx.temperature
