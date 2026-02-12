@@ -14,6 +14,7 @@ local ZL = Constants.Z_LEVELS
 local GRAVITY      = 20.0   -- blocks/s²
 local JUMP_VEL     = 8.5    -- initial upward velocity
 local SPRINT_MULT  = 1.8    -- speed multiplier when holding shift
+local SWIM_MULT    = 0.75   -- swim speed relative to base movement
 local HALF_W       = 0.3    -- player half-width (0.6 total)
 local PLAYER_H     = 1.7    -- height from feet to top of head
 local STEP_HEIGHT  = 0.6    -- auto-step up ledges this high
@@ -30,6 +31,7 @@ function Player3D.new()
         onGround = false,
         speed    = Constants.PLAYER_SPEED,
         flying   = false,
+        swimming = false,
     }, Player3D)
 end
 
@@ -96,18 +98,32 @@ function Player3D:update(dt, camera3d, chunkManager)
 
     if not chunkManager then
         -- No collision world (VoxelSpace mode): free movement only.
-        self.wx = self.wx + mx * moveSpeed * dt
-        self.wy = self.wy + my * moveSpeed * dt
+        local localSpeed = moveSpeed
+        if self.swimming and not self.flying then
+            localSpeed = localSpeed * SWIM_MULT
+        end
+
+        self.wx = self.wx + mx * localSpeed * dt
+        self.wy = self.wy + my * localSpeed * dt
         local dz = 0
         if self.flying and love.keyboard.isDown("space") then
-            dz = dz + moveSpeed * dt
+            dz = dz + localSpeed * dt
         end
         -- Keep shift descend when flight is active; ctrl always descends in flight.
         if self.flying and (love.keyboard.isDown("lshift") or love.keyboard.isDown("rshift")) then
-            dz = dz - moveSpeed * dt
+            dz = dz - localSpeed * dt
         end
         if self.flying and (love.keyboard.isDown("lctrl") or love.keyboard.isDown("rctrl")) then
-            dz = dz - moveSpeed * dt
+            dz = dz - localSpeed * dt
+        end
+        if self.swimming and not self.flying then
+            if love.keyboard.isDown("space") then
+                dz = dz + localSpeed * dt
+            end
+            if love.keyboard.isDown("lshift") or love.keyboard.isDown("rshift")
+                or love.keyboard.isDown("lctrl") or love.keyboard.isDown("rctrl") then
+                dz = dz - localSpeed * dt
+            end
         end
         self.wz = self.wz + dz
         if self.wz < 1 then self.wz = 1 end

@@ -205,12 +205,31 @@ function PlayingState:update(dt)
         -- In VoxelSpace mode, movement must not collide against Mesh3D chunks.
         self.player:update(dt, self.camera3d, nil)
         if not self.player.flying then
-            -- Ground-walk against the same heightfield the VoxelSpace renderer displays.
-            self.player.wz = RendererVS.getGroundHeight(self.player.wx, self.player.wy) + 1.0
-            self.player.vz = 0
-            self.player.onGround = true
+            local groundZ = RendererVS.getGroundHeight(self.player.wx, self.player.wy) + 1.0
+            local waterZ = RendererVS.getWaterSurfaceHeight()
+            local waterDepth = RendererVS.getWaterDepth(self.player.wx, self.player.wy)
+
+            if waterDepth > 1.2 then
+                -- Swim volume sits between seabed and the water plane.
+                local swimFloor = groundZ
+                local swimTop = waterZ + 0.15
+                if self.player.wz < swimFloor then self.player.wz = swimFloor end
+                if self.player.wz > swimTop then self.player.wz = swimTop end
+                self.player.swimming = true
+                self.player.onGround = self.player.wz <= swimFloor + 0.05
+                self.player.vz = 0
+            else
+                self.player.swimming = false
+                -- Ground-walk against the same heightfield the VoxelSpace renderer displays.
+                self.player.wz = groundZ
+                self.player.vz = 0
+                self.player.onGround = true
+            end
+        else
+            self.player.swimming = false
         end
     else
+        self.player.swimming = false
         self.player:update(dt, self.camera3d, self.chunkManager)
         local px, py = self.player:getWorldPos()
         self.chunkManager:update(px, py, dt)

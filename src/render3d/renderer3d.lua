@@ -508,7 +508,7 @@ function Renderer3D.drawHUD(player, camera3d, chunkManager)
     love.graphics.print(string.format("FPS: %d  Chunks: %d", fps, loadedChunks), 10, 10)
     love.graphics.print(string.format("Pos: %d, %d, %d  Chunk: %d, %d", tx, ty, tz, cx, cy), 10, 28)
     love.graphics.print(string.format("Yaw: %.1f  Pitch: %.1f", yawDeg, pitchDeg), 10, 46)
-    local mode = player.flying and "FLY" or (player.onGround and "GROUND" or "AIR")
+    local mode = player.flying and "FLY" or (player.swimming and "SWIM" or (player.onGround and "GROUND" or "AIR"))
     love.graphics.print(string.format("Mode: %s  Time: %s", mode, Sky.getTimeString()), 10, 64)
     love.graphics.print(string.format("Meshes: %d drawn / %d total  Rebuilds: %d",
         Renderer3D._meshesDrawn or 0, Renderer3D._meshesTotal or 0,

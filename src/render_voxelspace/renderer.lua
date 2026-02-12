@@ -90,9 +90,20 @@ function RendererVS.getGroundHeight(wx, wy)
     if not map then
         RendererVS.init(Constants.DEFAULT_SEED)
     end
-    local h8 = map:sample(wx, wy)
+    local h8 = map:sampleTerrainHeight(wx, wy)
     -- Convert map height byte [0..255] back to world Z surface height.
     return (h8 / 255.0) * max(1, Constants.Z_LEVELS - 1)
+end
+
+function RendererVS.getWaterSurfaceHeight()
+    return Constants.WATER_LEVEL_Z
+end
+
+function RendererVS.getWaterDepth(wx, wy)
+    if not map then
+        RendererVS.init(Constants.DEFAULT_SEED)
+    end
+    return map:sampleWaterDepth(wx, wy)
 end
 
 function RendererVS.draw(camera3d, player)
@@ -101,6 +112,17 @@ function RendererVS.draw(camera3d, player)
     end
 
     local skyR, skyG, skyB = Sky.getSkyColor()
+    local water8 = (Constants.WATER_LEVEL_Z / max(1, Constants.Z_LEVELS - 1)) * 255.0
+    local camHeight = player.wz * 4.0 + 32
+    local underDepth = max(0, water8 - camHeight)
+    local underwater = underDepth > 0.01
+    local underT = min(1.0, underDepth / 28.0)
+    if underwater then
+        -- Underwater palette shift so sky/horizon stop popping unnaturally.
+        skyR = skyR * (0.30 + 0.20 * (1 - underT))
+        skyG = skyG * (0.50 + 0.15 * (1 - underT))
+        skyB = min(1.0, skyB * 0.75 + 0.20)
+    end
     love.graphics.clear(skyR, skyG, skyB, 1)
 
     ensureYBuffer()
@@ -109,8 +131,6 @@ function RendererVS.draw(camera3d, player)
     local pitch = camera3d.pitch
 
     local horizon = screenH * 0.52 + pitch * 230
-    local camHeight = player.wz * 4.0 + 32
-
     -- Build left/right edge rays from camera basis + horizontal FOV.
     local fx, fy = camera3d:getForwardFlat()
     local rx, ry = camera3d:getRight()
@@ -161,9 +181,13 @@ function RendererVS.draw(camera3d, player)
             local bot = yBuffer[sx]
 
             if top < bot then
-                local r = cr * (1 - fog) + skyR * fog
-                local g = cg * (1 - fog) + skyG * fog
-                local b = cb * (1 - fog) + skyB * fog
+                local fogMix = fog
+                if underwater then
+                    fogMix = min(1.0, fog + 0.22 + underT * 0.28)
+                end
+                local r = cr * (1 - fogMix) + skyR * fogMix
+                local g = cg * (1 - fogMix) + skyG * fogMix
+                local b = cb * (1 - fogMix) + skyB * fogMix
                 love.graphics.setColor(r, g, b, 1)
                 love.graphics.rectangle("fill", sx - 1, top, quality.columnStep, bot - top)
                 local lastX = min(screenW, sx + quality.columnStep - 1)
@@ -176,6 +200,12 @@ function RendererVS.draw(camera3d, player)
 
         z = z + step
         step = min(8.5, step + quality.depthGrowth)
+    end
+
+    if underwater then
+        -- Final depth veil smooths banding and improves underwater readability.
+        love.graphics.setColor(0.07, 0.20, 0.30, 0.10 + underT * 0.16)
+        love.graphics.rectangle("fill", 0, 0, screenW, screenH)
     end
 
 end

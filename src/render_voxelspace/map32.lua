@@ -7,6 +7,7 @@ local Noise = require("src.util.noise")
 local floor = math.floor
 local max = math.max
 local min = math.min
+local WATER_BAND_LEVELS = 5
 
 local Map32 = {}
 Map32.__index = Map32
@@ -53,6 +54,8 @@ function Map32.new(seed, size, spacing)
     self.spacing = spacing or 2
     self.worldSize = self.size * self.spacing
     self.heights = {}
+    self.terrainHeights = {}
+    self.waterDepths = {}
     self.colors = {}
 
     local water = Constants.WATER_LEVEL_Z
@@ -68,15 +71,19 @@ function Map32.new(seed, size, spacing)
             -- raw terrain noise can look too jagged at distance.
             local eSmooth = sampleSmoothedElevation(self.seed, wx, wy, self.spacing * 3)
             local surf = TerrainFields.surfaceZFromElevation(eSmooth)
-            self.heights[i] = floor(surf * hScale + 0.5)
+            self.terrainHeights[i] = floor(surf * hScale + 0.5)
 
             local r, g, b
             if surf <= water then
-                local d = clamp01((water - surf) / max(1, water))
-                -- calm deep-to-shallow water ramp
-                r = lerp(0.07, 0.15, 1 - d)
-                g = lerp(0.18, 0.34, 1 - d)
-                b = lerp(0.33, 0.62, 1 - d)
+                local rawDepth = water - surf
+                local d = clamp01(rawDepth / max(1, water))
+                local band = floor(d * WATER_BAND_LEVELS + 0.5) / WATER_BAND_LEVELS
+                -- Layered, stepped water shades (shallows -> deep ocean).
+                r = lerp(0.09, 0.03, band)
+                g = lerp(0.26, 0.14, band)
+                b = lerp(0.60, 0.44, band)
+                self.heights[i] = floor(water * hScale + 0.5)
+                self.waterDepths[i] = rawDepth
             else
                 local landH = clamp01((surf - water) / max(1, (Constants.Z_LEVELS - water)))
                 if surf < water + 3 then
@@ -113,6 +120,8 @@ function Map32.new(seed, size, spacing)
                         b = b * 0.90
                     end
                 end
+                self.heights[i] = self.terrainHeights[i]
+                self.waterDepths[i] = 0
             end
 
             r, g, b = desaturate(clamp01(r), clamp01(g), clamp01(b), 0.22)
@@ -125,7 +134,7 @@ function Map32.new(seed, size, spacing)
     return self
 end
 
-function Map32:sample(wx, wy)
+local function sampleScalar(self, values, wx, wy)
     -- Continuous sample from discrete map via bilinear interpolation.
     local gx = wx / self.spacing
     local gy = wy / self.spacing
@@ -147,13 +156,17 @@ function Map32:sample(wx, wy)
     local i01 = y1 * self.size + x0 + 1
     local i11 = y1 * self.size + x1 + 1
 
-    local h00 = self.heights[i00]
-    local h10 = self.heights[i10]
-    local h01 = self.heights[i01]
-    local h11 = self.heights[i11]
+    local h00 = values[i00]
+    local h10 = values[i10]
+    local h01 = values[i01]
+    local h11 = values[i11]
     local hx0 = lerp(h00, h10, tx)
     local hx1 = lerp(h01, h11, tx)
-    local h = lerp(hx0, hx1, ty)
+    return lerp(hx0, hx1, ty), i00, i10, i01, i11, tx, ty
+end
+
+function Map32:sample(wx, wy)
+    local h, i00, i10, i01, i11, tx, ty = sampleScalar(self, self.heights, wx, wy)
 
     local c00 = self.colors[i00]
     local c10 = self.colors[i10]
@@ -165,6 +178,14 @@ function Map32:sample(wx, wy)
     local b = lerp(lerp(c00[3], c10[3], tx), lerp(c01[3], c11[3], tx), ty)
 
     return h, r, g, b
+end
+
+function Map32:sampleTerrainHeight(wx, wy)
+    return sampleScalar(self, self.terrainHeights, wx, wy)
+end
+
+function Map32:sampleWaterDepth(wx, wy)
+    return sampleScalar(self, self.waterDepths, wx, wy)
 end
 
 return Map32

@@ -57,7 +57,7 @@ Constants.CACHE_HARD_EVICT_MARGIN = 6
 Constants.CACHE_MAX_FORCED_EVICT_PER_FRAME = 8
 
 -- Player
-Constants.PLAYER_SPEED = 6.0
+Constants.PLAYER_SPEED = 7.5
 Constants.EYE_HEIGHT = 1.6
 Constants.MOUSE_SENS = 0.003
 

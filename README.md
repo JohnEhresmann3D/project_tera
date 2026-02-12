@@ -19,8 +19,8 @@ love .
 
 - `W/A/S/D`: Move
 - `Mouse`: Look
-- `Space`: Jump (or fly up while flying)
-- `Shift`: Sprint (ground) / descend (flying)
+- `Space`: Jump, fly up, or swim up
+- `Shift`: Sprint (ground) / descend (flying or swimming)
 - `F`: Toggle flight mode
 - `Tab`: Toggle mouse capture
 - `R`: Regenerate world with next seed
@@ -43,6 +43,7 @@ love .
 - On-disk chunk persistence (generated chunks are reused when revisiting)
 - Mesh-cached chunk rendering with frustum culling
 - Alternate VoxelSpace32 terrain renderer mode (terrain-only)
+- Layered VoxelSpace water depth shading + swim movement in water columns
 - Day/night sky + fog + ambient lighting
 - Basic first-person movement/collision/flight
 
