@@ -1,9 +1,24 @@
-local lnoise = love.math.noise
 local abs = math.abs
 local exp = math.exp
 local floor = math.floor
 
 local Noise = {}
+local lnoise = nil
+
+local function resolveNoiseFn()
+    if lnoise then
+        return lnoise
+    end
+    if love and love.math and love.math.noise then
+        lnoise = love.math.noise
+        return lnoise
+    end
+    if math.noise then
+        lnoise = math.noise
+        return lnoise
+    end
+    error("No noise function available (love.math.noise / math.noise)")
+end
 
 -- Keep seed-derived coordinate offsets in a numerically stable range.
 -- Very large raw seeds can cause precision loss in noise inputs and flatten variation.
@@ -31,11 +46,11 @@ end
 
 -- Remap love.math.noise from [0,1] to [-1,1]
 local function noise2D(x, y)
-    return lnoise(x, y) * 2 - 1
+    return resolveNoiseFn()(x, y) * 2 - 1
 end
 
 local function noise3D(x, y, z)
-    return lnoise(x, y, z) * 2 - 1
+    return resolveNoiseFn()(x, y, z) * 2 - 1
 end
 
 Noise.noise2D = noise2D

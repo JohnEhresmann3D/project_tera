@@ -1,5 +1,7 @@
 local requestChannelName, resultChannelName = ...
 
+require("love.math")
+
 local Pipeline = require("src.gen.pipeline")
 local Chunk = require("src.world.chunk")
 local ChunkCodec = require("src.gen.chunk_codec")

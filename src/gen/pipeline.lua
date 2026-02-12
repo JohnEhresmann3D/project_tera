@@ -24,7 +24,10 @@ function Pipeline.generate(chunk, worldSeed, budgetMs)
         temperature = chunk._temperature or {},
     }
 
-    local startTime = love.timer.getTime()
+    local startTime = nil
+    if budgetMs then
+        startTime = love.timer.getTime()
+    end
 
     for i = chunk.genStage + 1, #Pipeline.stages do
         local stage = Pipeline.stages[i]
@@ -36,7 +39,7 @@ function Pipeline.generate(chunk, worldSeed, budgetMs)
         chunk._moisture = ctx.moisture
         chunk._temperature = ctx.temperature
 
-        if budgetMs then
+        if budgetMs and startTime then
             local elapsed = (love.timer.getTime() - startTime) * 1000
             if elapsed >= budgetMs and i < #Pipeline.stages then
                 return false  -- budget exceeded, continue next frame
