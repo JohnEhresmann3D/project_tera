@@ -4,7 +4,7 @@ Terragen is a Love2D voxel world prototype with procedural chunk generation, bio
 
 ## Requirements
 
-- [LÖVE](https://love2d.org/) 11.4
+- [LOVE](https://love2d.org/) 11.5
 - Windows/macOS/Linux capable of running Love2D 11.x
 
 ## Run
@@ -24,7 +24,9 @@ love .
 - `F`: Toggle flight mode
 - `Tab`: Toggle mouse capture
 - `R`: Regenerate world with next seed
-- `F1..F7`: Debug overlay modes
+- `F1..F8`: Debug overlay modes (`F8` noise preview)
+- `F9`: Cycle performance tier
+- `F10`: Toggle render mode (`mesh3d` / `voxelspace32`)
 - `Esc`: Quit
 
 ## What Exists Today
@@ -37,7 +39,10 @@ love .
   - structures
   - decoration
 - Chunk streaming and eviction with per-frame generation budget
+- Threaded chunk generation worker + main-thread meshing
+- On-disk chunk persistence (generated chunks are reused when revisiting)
 - Mesh-cached chunk rendering with frustum culling
+- Alternate VoxelSpace32 terrain renderer mode (terrain-only)
 - Day/night sky + fog + ambient lighting
 - Basic first-person movement/collision/flight
 
